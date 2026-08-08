@@ -1,0 +1,234 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 98%;
+    --foreground: 222 47% 11%;
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 11%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 11%;
+    --primary: 353 73% 44%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 215 52% 25%;
+    --secondary-foreground: 0 0% 100%;
+    --muted: 210 40% 96%;
+    --muted-foreground: 215 16% 47%;
+    --accent: 38 92% 50%;
+    --accent-foreground: 222 47% 11%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 214 32% 91%;
+    --input: 214 32% 91%;
+    --ring: 353 73% 44%;
+    --radius: 0.75rem;
+  }
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+    -webkit-tap-highlight-color: transparent;
+    overflow-x: hidden;
+  }
+  *, *::before, *::after {
+    border-color: hsl(var(--border));
+    box-sizing: border-box;
+  }
+  body {
+    @apply bg-slate-50 text-slate-900 antialiased min-h-screen overflow-x-hidden;
+    font-family: var(--font-inter), system-ui, sans-serif;
+    font-feature-settings: "rlig" 1, "calt" 1;
+    /* Crisper text rendering */
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  /* Scroll lock when the mobile drawer is open — covers the window scroller
+     and the protected layout's inner <main> scroller. */
+  html.menu-open,
+  body.menu-open {
+    overflow: hidden;
+  }
+  html.menu-open main {
+    overflow: hidden !important;
+  }
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-roboto), var(--font-inter), system-ui, sans-serif;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    line-height: 1.2;
+  }
+  /* WCAG 2.1 AA – visible focus ring */
+  :focus-visible {
+    outline: 2px solid #C41E2E;
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+  /* Site-wide smooth button scale animations */
+  button,
+  [role="button"] {
+    transition: transform 0.15s cubic-bezier(0.16, 1, 0.3, 1),
+                background-color 0.15s ease,
+                border-color 0.15s ease,
+                box-shadow 0.15s ease,
+                opacity 0.15s ease;
+  }
+  button:not(:disabled):hover,
+  [role="button"]:not(:disabled):hover {
+    transform: scale(1.02);
+  }
+  button:not(:disabled):active,
+  [role="button"]:not(:disabled):active {
+    transform: scale(0.96);
+  }
+  /* selection */
+  ::selection {
+    background-color: rgba(196, 30, 46, 0.15);
+    color: #C41E2E;
+  }
+  /* Respect user reduced-motion preference */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+/* ── Elevation / Glass ─────────────────────────────────────────── */
+.glass-panel {
+  background: rgba(255,255,255,0.88);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(226,232,240,0.8);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+}
+.glass-panel-dark {
+  background: rgba(15,23,42,0.88);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255,255,255,0.08);
+}
+.elevation-sm  { box-shadow: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.04); }
+.elevation-md  { box-shadow: 0 4px 12px rgba(0,0,0,0.1), 0 2px 4px rgba(0,0,0,0.06); }
+.elevation-lg  { box-shadow: 0 10px 30px rgba(0,0,0,0.12), 0 4px 10px rgba(0,0,0,0.08); }
+
+/* ── Brand Gradients ───────────────────────────────────────────── */
+.bses-gradient-hero {
+  background: linear-gradient(135deg, #0F172A 0%, #162035 60%, #1E3A5F 100%);
+}
+.bses-gradient-red {
+  background: linear-gradient(135deg, #C41E2E 0%, #9B1522 100%);
+}
+
+/* ── Skeleton shimmer ──────────────────────────────────────────── */
+.skeleton-shimmer {
+  background: linear-gradient(
+    90deg,
+    #f1f5f9 25%,
+    #e2e8f0 37%,
+    #f1f5f9 63%
+  );
+  background-size: 400% 100%;
+  animation: shimmer 1.6s infinite linear;
+}
+
+/* ── Keyframes ─────────────────────────────────────────────────── */
+@keyframes shimmer {
+  0%   { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+@keyframes drawer-slide-down {
+  0% {
+    opacity: 0;
+    transform: translateY(-12px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes drawer-slide-up {
+  0% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+}
+
+@keyframes backdrop-fade-in {
+  0% { opacity: 0; }
+  100% { opacity: 1; }
+}
+
+@keyframes backdrop-fade-out {
+  0% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+@keyframes bounce-horizontal {
+  0%, 100% { transform: translateX(-2px); }
+  50% { transform: translateX(3px); }
+}
+.animate-bounce-horizontal {
+  animation: bounce-horizontal 0.9s infinite ease-in-out;
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes fade-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ── Mobile drawer animation ───────────────────────────────────── */
+.mobile-menu-enter {
+  animation: drawer-slide-down 0.2s cubic-bezier(0.22, 1, 0.36, 1) both;
+  will-change: transform, opacity;
+}
+.mobile-menu-exit {
+  animation: drawer-slide-up 0.15s cubic-bezier(0.55, 0, 1, 0.45) both;
+  will-change: transform, opacity;
+}
+.mobile-backdrop-enter {
+  animation: backdrop-fade-in 0.18s ease-out both;
+}
+.mobile-backdrop-exit {
+  animation: backdrop-fade-out 0.15s ease-in both;
+}
+
+/* ── Page transition ───────────────────────────────────────────── */
+/* Pure opacity — no translateY so there is zero content shift */
+.page-enter {
+  animation: fade-in 0.18s ease-out both;
+}
+
+/* ── Utility ───────────────────────────────────────────────────── */
+.page-container {
+  @apply w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8;
+}
+.section-gap { @apply py-16 sm:py-20 lg:py-24; }
+
+/* ── Progress bar glow ─────────────────────────────────────────── */
+.progress-bar-glow {
+  box-shadow: 0 0 8px rgba(196, 30, 46, 0.6), 0 0 2px rgba(245, 158, 11, 0.4);
+}

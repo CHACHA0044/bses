@@ -1,0 +1,414 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Enums ────────────────────────────────────────────────────────────────────
+
+enum UserRole {
+  CONSUMER
+  ADMIN
+  SUPER_ADMIN
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+  PENDING_VERIFICATION
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
+  PREFER_NOT_TO_SAY
+}
+
+enum ConnectionStatus {
+  DRAFT
+  SUBMITTED
+  ASSIGNED
+  UNDER_VERIFICATION
+  DOCUMENTS_PENDING
+  VERIFICATION_COMPLETE
+  APPROVED
+  REJECTED
+  CONNECTION_SCHEDULED
+  CONNECTION_COMPLETED
+}
+
+enum ConnectionType {
+  DOMESTIC
+  COMMERCIAL
+  INDUSTRIAL
+  AGRICULTURAL
+}
+
+enum DocumentType {
+  AADHAAR_CARD
+  PAN_CARD
+  ADDRESS_PROOF
+  OWNERSHIP_PROOF
+  PASSPORT_PHOTO
+  AFFIDAVIT
+  OTHER
+}
+
+enum DocumentStatus {
+  PENDING
+  VERIFIED
+  REJECTED
+}
+
+enum NotificationType {
+  SMS
+  WHATSAPP
+  EMAIL
+}
+
+enum NotificationStatus {
+  SIMULATED
+  SENT
+  FAILED
+}
+
+enum ConsentType {
+  PRIVACY_POLICY
+  DPDP_DATA_COLLECTION
+  MARKETING_COMMUNICATIONS
+}
+
+enum AuditAction {
+  USER_REGISTERED
+  USER_LOGIN
+  USER_LOGOUT
+  PROFILE_UPDATED
+  PASSWORD_CHANGED
+  CONNECTION_APPLIED
+  CONNECTION_STATUS_UPDATED
+  DOCUMENT_UPLOADED
+  DOCUMENT_DELETED
+  ADMIN_USER_DEACTIVATED
+  ADMIN_USER_EDITED
+  // ── Workflow engine audit actions ──
+  APPLICATION_SUBMITTED
+  APPLICATION_ASSIGNED
+  APPLICATION_REASSIGNED
+  WORKFLOW_TRANSITION
+  VERIFICATION_STARTED
+  VERIFICATION_COMPLETED
+  REMARK_ADDED
+  DOCUMENT_APPROVED
+  DOCUMENT_REJECTED
+  DOCUMENT_REQUESTED
+  CONNECTION_SCHEDULED
+  CONNECTION_COMPLETED
+}
+
+// Action identifiers recorded in `application_timeline` and `workflow_actions`
+enum WorkflowActionType {
+  APPLICATION_CREATED
+  DOCUMENT_UPLOADED
+  SUBMIT
+  ASSIGN
+  REASSIGN
+  START_VERIFICATION
+  REQUEST_DOCUMENTS
+  COMPLETE_VERIFICATION
+  APPROVE
+  REJECT
+  SCHEDULE_CONNECTION
+  COMPLETE_CONNECTION
+  ADD_REMARK
+  DOCUMENT_APPROVE
+  DOCUMENT_REJECT
+  DOCUMENT_REQUEST
+}
+
+// Lifecycle of an application-assignment record
+enum AssignmentStatus {
+  ACTIVE
+  REPLACED
+  CLOSED
+}
+
+// Outcome of a single document verification action
+enum VerificationResult {
+  APPROVED
+  REJECTED
+  REQUESTED
+}
+
+// ─── Tables ───────────────────────────────────────────────────────────────────
+
+model User {
+  id               String     @id @default(cuid())
+  firstName        String     @map("first_name") @db.VarChar(50)
+  middleName       String?    @map("middle_name") @db.VarChar(50)
+  lastName         String     @map("last_name") @db.VarChar(50)
+  gender           Gender
+  email            String     @unique @db.VarChar(254)
+  // Mobile and Aadhaar stored as AES-256 ciphertext — never in plaintext
+  mobileEncrypted        String     @map("mobile_encrypted")
+  mobileHash             String?    @unique @map("mobile_hash") @db.VarChar(64)
+  aadhaarEncrypted       String?    @map("aadhaar_encrypted")
+  username               String     @unique @db.VarChar(30)
+  passwordHash           String     @map("password_hash")
+  caNumber               String?    @unique @map("ca_number") @db.VarChar(15)
+  meterNumber            String?    @unique @map("meter_number") @db.VarChar(20)
+  role                   UserRole   @default(CONSUMER)
+  status                 UserStatus @default(ACTIVE)
+  failedLoginAttempts    Int        @default(0) @map("failed_login_attempts")
+  lockedUntil            DateTime?  @map("locked_until")
+  lastLoginAt            DateTime?  @map("last_login_at")
+  resetPasswordTokenHash String?    @map("reset_password_token_hash")
+  resetPasswordExpiresAt DateTime?  @map("reset_password_expires_at")
+  createdAt              DateTime   @default(now()) @map("created_at")
+  updatedAt              DateTime   @updatedAt @map("updated_at")
+  deletedAt              DateTime?  @map("deleted_at")
+
+  connectionRequests ConnectionRequest[]
+  documents          Document[]
+  notificationLogs   NotificationLog[]
+  auditLogs          AuditLog[]
+  consentRecords     ConsentRecord[]
+  refreshTokens      RefreshToken[]
+
+  @@index([email])
+  @@index([username])
+  @@index([caNumber])
+  @@index([meterNumber])
+  @@index([mobileHash])
+  @@map("users")
+}
+
+model RefreshToken {
+  id              String    @id @default(cuid())
+  userId          String    @map("user_id")
+  tokenHash       String    @unique @map("token_hash")
+  expiresAt       DateTime  @map("expires_at")
+  revokedAt       DateTime? @map("revoked_at")
+  replacedByToken String?   @map("replaced_by_token")
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([tokenHash])
+  @@map("refresh_tokens")
+}
+
+model Admin {
+  id           String   @id @default(cuid())
+  name         String   @db.VarChar(100)
+  email        String   @unique @db.VarChar(254)
+  passwordHash String   @map("password_hash")
+  role         UserRole @default(ADMIN)
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@index([email])
+  @@map("admins")
+}
+
+model ConnectionRequest {
+  id                String           @id @default(cuid())
+  userId            String           @map("user_id")
+  applicationNumber String           @unique @map("application_number") @db.VarChar(30)
+  connectionType    ConnectionType   @map("connection_type")
+  // Stored as Decimal for precision — kW unit
+  requiredLoad      Decimal          @map("required_load") @db.Decimal(8, 2)
+  propertyAddress   String           @map("property_address") @db.Text
+  status            ConnectionStatus @default(DRAFT)
+  submittedAt       DateTime?        @map("submitted_at")
+  updatedAt         DateTime         @updatedAt @map("updated_at")
+  deletedAt         DateTime?        @map("deleted_at")
+
+  user      User                    @relation(fields: [userId], references: [id], onDelete: Restrict)
+  documents Document[]
+  timeline  ApplicationTimeline[]
+  actions   WorkflowAction[]
+  assignments ApplicationAssignment[]
+  verifications VerificationHistory[]
+
+  @@index([userId])
+  @@index([applicationNumber])
+  @@index([status])
+  @@map("connection_requests")
+}
+
+// Immutable append-only log of every event in an application's lifecycle
+model ApplicationTimeline {
+  id          String             @id @default(cuid())
+  connectionRequestId String      @map("connection_request_id")
+  action      WorkflowActionType
+  // Status of the application after this event
+  status      ConnectionStatus   @map("status")
+  performedBy String             @map("performed_by") @db.VarChar(100)
+  // Human-readable description of the event
+  notes       String?            @db.Text
+  // Additional structured context as JSON (e.g. { documentId, verificationId })
+  metadata    Json?
+  createdAt   DateTime           @default(now()) @map("created_at")
+
+  connectionRequest ConnectionRequest @relation(fields: [connectionRequestId], references: [id], onDelete: Cascade)
+
+  @@index([connectionRequestId])
+  @@index([action])
+  @@index([createdAt])
+  @@map("application_timeline")
+}
+
+// Every workflow action ever invoked against an application — supersedes the
+// status column of ConnectionRequest as the source of truth for transitions
+model WorkflowAction {
+  id            String             @id @default(cuid())
+  connectionRequestId String        @map("connection_request_id")
+  action        WorkflowActionType
+  // State before the action
+  fromStatus    ConnectionStatus   @map("from_status")
+  // State after the action
+  toStatus      ConnectionStatus   @map("to_status")
+  performedById String             @map("performed_by_id")
+  performedByName String           @map("performed_by_name") @db.VarChar(100)
+  performedByRole String           @map("performed_by_role") @db.VarChar(50)
+  comment       String?            @db.Text
+  // Reference to the related workflow_action record for reassignments
+  previousActionId String?         @map("previous_action_id")
+  createdAt     DateTime           @default(now()) @map("created_at")
+
+  connectionRequest ConnectionRequest @relation(fields: [connectionRequestId], references: [id], onDelete: Cascade)
+  previousAction WorkflowAction? @relation("WorkflowActionHistory", fields: [previousActionId], references: [id])
+  subsequentActions WorkflowAction[] @relation("WorkflowActionHistory")
+
+  @@index([connectionRequestId])
+  @@index([action])
+  @@index([createdAt])
+  @@map("workflow_actions")
+}
+
+// Current and historical assignment of applications to officers
+model ApplicationAssignment {
+  id            String           @id @default(cuid())
+  connectionRequestId String      @map("connection_request_id")
+  assignedToId  String           @map("assigned_to_id")
+  assignedToName String          @map("assigned_to_name") @db.VarChar(100)
+  assignedToRole String          @map("assigned_to_role") @db.VarChar(50)
+  status        AssignmentStatus @default(ACTIVE)
+  assignedById  String           @map("assigned_by_id")
+  assignedByName String          @map("assigned_by_name") @db.VarChar(100)
+  assignedAt    DateTime         @default(now()) @map("assigned_at")
+  // Optional reason for reassignment / unassignment
+  notes         String?          @db.Text
+  releasedAt    DateTime?        @map("released_at")
+  // References the workflow action that created this assignment
+  actionId      String?          @map("action_id")
+
+  connectionRequest ConnectionRequest @relation(fields: [connectionRequestId], references: [id], onDelete: Cascade)
+
+  @@index([connectionRequestId])
+  @@index([assignedToId])
+  @@index([status])
+  @@map("application_assignments")
+}
+
+// Document-level verification history
+model VerificationHistory {
+  id            String           @id @default(cuid())
+  connectionRequestId String      @map("connection_request_id")
+  documentId    String           @map("document_id")
+  performedById String           @map("performed_by_id")
+  performedByName String         @map("performed_by_name") @db.VarChar(100)
+  performedByRole String         @map("performed_by_role") @db.VarChar(50)
+  action        VerificationResult
+  comment       String?          @db.Text
+  createdAt     DateTime         @default(now()) @map("created_at")
+
+  connectionRequest ConnectionRequest @relation(fields: [connectionRequestId], references: [id], onDelete: Cascade)
+
+  @@index([connectionRequestId])
+  @@index([documentId])
+  @@index([createdAt])
+  @@map("verification_history")
+}
+
+// Stores metadata only — binary files live in MongoDB GridFS
+model Document {
+  id                  String         @id @default(cuid())
+  userId              String         @map("user_id")
+  connectionRequestId String?        @map("connection_request_id")
+  documentName        String         @map("document_name") @db.VarChar(255)
+  documentType        DocumentType   @map("document_type")
+  gridfsFileId        String         @map("gridfs_file_id")
+  fileSize            Int            @map("file_size")
+  mimeType            String         @map("mime_type") @db.VarChar(100)
+  uploadDate          DateTime       @default(now()) @map("upload_date")
+  status              DocumentStatus @default(PENDING)
+  deletedAt           DateTime?      @map("deleted_at")
+
+  user              User               @relation(fields: [userId], references: [id], onDelete: Restrict)
+  connectionRequest ConnectionRequest? @relation(fields: [connectionRequestId], references: [id])
+
+  @@index([userId])
+  @@index([connectionRequestId])
+  @@index([documentType])
+  @@map("documents")
+}
+
+model NotificationLog {
+  id        String             @id @default(cuid())
+  userId    String             @map("user_id")
+  type      NotificationType
+  recipient String             @db.VarChar(254)
+  message   String             @db.Text
+  status    NotificationStatus
+  createdAt DateTime           @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@index([userId])
+  @@index([type])
+  @@index([status])
+  @@map("notification_logs")
+}
+
+// Immutable audit trail — no update or delete operations should target this table
+model AuditLog {
+  id          String      @id @default(cuid())
+  userId      String?     @map("user_id")
+  performedBy String      @map("performed_by") @db.VarChar(100)
+  action      AuditAction
+  module      String      @db.VarChar(50)
+  // Supports both IPv4 and IPv6
+  ipAddress   String      @map("ip_address") @db.VarChar(45)
+  timestamp   DateTime    @default(now())
+  // Structured workflow context: actor role, old/new status, remarks, request ID
+  metadata    Json?       @map("metadata")
+
+  user User? @relation(fields: [userId], references: [id])
+
+  @@index([performedBy])
+  @@index([timestamp])
+  @@map("audit_logs")
+}
+
+// DPDP Act 2023 compliance — explicit consent records with timestamp and IP
+model ConsentRecord {
+  id                   String      @id @default(cuid())
+  userId               String      @map("user_id")
+  consentType          ConsentType @map("consent_type")
+  accepted             Boolean
+  acceptedAt           DateTime    @default(now()) @map("accepted_at")
+  ipAddress            String      @map("ip_address") @db.VarChar(45)
+  privacyPolicyVersion String      @default("v1.0") @map("privacy_policy_version") @db.VarChar(20)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@index([userId])
+  @@index([acceptedAt])
+  @@map("consent_records")
+}
