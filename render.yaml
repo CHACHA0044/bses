@@ -21,9 +21,8 @@ services:
     buildCommand: >
       npm install --include=dev --legacy-peer-deps &&
       cd services/auth-service && npx prisma generate &&
-      cd ../.. && npx turbo run build &&
-      cd services/auth-service && npx prisma migrate deploy
-    startCommand: node apps/supervisor/dist/index.js
+      cd ../.. && npx turbo run build
+    startCommand: cd services/auth-service && npx prisma migrate deploy && cd ../.. && node apps/supervisor/dist/index.js
     healthCheckPath: /health
     autoDeploy: true
     plan: free
