@@ -1,8 +1,24 @@
 import { PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { createLogger } from '@bses/shared';
+import dns from 'node:dns';
 
 const logger = createLogger({ service: 'prisma-client' });
+
+/**
+ * Force IPv4 DNS resolution for the entire process.
+ *
+ * Many PaaS providers (Render free tier, some serverless runtimes) only expose
+ * IPv4 networking. When a managed Postgres hostname (e.g. Supabase's
+ * `db.<ref>.supabase.co`) returns an AAAA record, node-postgres throws
+ * `connect ENETUNREACH ::<ip>:5432`. Setting the default DNS result order to
+ * `ipv4first` makes every `dns.lookup` (which is what pg/Prisma use) return the
+ * A record when one exists, sidestepping the problem on every host.
+ *
+ * This is a process-wide, one-time setting and is safe — IPv4 is universally
+ * supported and is the more common Postgres endpoint today.
+ */
+dns.setDefaultResultOrder('ipv4first');
 
 let prismaInstance: PrismaClient | null = null;
 
@@ -27,7 +43,10 @@ export const getPrismaClient = (): PrismaClient => {
   return prismaInstance;
 };
 
-export const connectDatabase = async (maxRetries = 5, initialDelayMs = 1000): Promise<PrismaClient> => {
+export const connectDatabase = async (
+  maxRetries = 5,
+  initialDelayMs = 1000,
+): Promise<PrismaClient> => {
   const prisma = getPrismaClient();
   let attempts = 0;
   let delay = initialDelayMs;
@@ -39,7 +58,9 @@ export const connectDatabase = async (maxRetries = 5, initialDelayMs = 1000): Pr
       logger.info('Successfully connected to PostgreSQL via Prisma ORM');
       return prisma;
     } catch (err: unknown) {
-      logger.warn(`PostgreSQL connection attempt ${attempts}/${maxRetries} failed: ${err instanceof Error ? err.message : String(err)}`);
+      logger.warn(
+        `PostgreSQL connection attempt ${attempts}/${maxRetries} failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
       if (attempts >= maxRetries) {
         logger.error('Max PostgreSQL connection retries reached. Database unavailable.');
         throw err;
@@ -61,7 +82,10 @@ export const disconnectDatabase = async (): Promise<void> => {
   }
 };
 
-export const checkDatabaseHealth = async (): Promise<{ ready: boolean; details?: Record<string, unknown> }> => {
+export const checkDatabaseHealth = async (): Promise<{
+  ready: boolean;
+  details?: Record<string, unknown>;
+}> => {
   try {
     const prisma = getPrismaClient();
     await prisma.$queryRaw`SELECT 1`;
