@@ -46,6 +46,10 @@ services:
         sync: false
       - key: CORS_ORIGINS
         sync: false
+      - key: FRONTEND_URL
+        value: "https://bses-gateway.vercel.app"
+      - key: NOTIFICATION_SERVICE_URL
+        value: "http://127.0.0.1:3013"
       - key: MONGODB_URI
         sync: false
       - key: GRIDFS_BUCKET

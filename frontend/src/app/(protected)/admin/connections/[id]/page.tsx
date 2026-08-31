@@ -282,6 +282,10 @@ export default function AdminConnectionDetailPage() {
 
     fetchDocument();
     return () => { cancelled = true; };
+    // Intentionally keyed on the doc id only: re-fetching on every previewDoc
+    // identity change would be redundant, and including previewBlobUrl would
+    // re-trigger a fetch each time a new blob URL is set.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [previewDoc?.id]);
 
   // Clean up blob URL on unmount
@@ -289,6 +293,9 @@ export default function AdminConnectionDetailPage() {
     return () => {
       if (previewBlobUrl) URL.revokeObjectURL(previewBlobUrl);
     };
+    // Runs once on unmount only; allowing previewBlobUrl in the deps would
+    // revoke each newly created blob URL immediately.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const run = async (fn: () => Promise<unknown>): Promise<void> => {
@@ -896,6 +903,9 @@ export default function AdminConnectionDetailPage() {
             {previewBlobUrl && !previewLoading && (
               previewDoc.mimeType.startsWith('image/') ? (
                 <div className="w-full h-[440px] rounded-xl border border-slate-200 bg-slate-900/5 flex items-center justify-center p-2 overflow-hidden">
+                  {/* Blob preview URLs cannot flow through next/image's optimizer/cache,
+                      so a plain <img> is required here. */}
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
                     src={previewBlobUrl}
                     alt={previewDoc.documentName}

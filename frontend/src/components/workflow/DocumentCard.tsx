@@ -156,7 +156,7 @@ export const DocumentCard: React.FC<DocumentCardProps> = ({ doc, variant = 'cons
                 ))}
               </div>
             ) : (
-              <p className="text-slate-400 italic">Click "Review &amp; Edit" to verify extracted details.</p>
+              <p className="text-slate-400 italic">Click &quot;Review &amp; Edit&quot; to verify extracted details.</p>
             )}
           </div>
         )}

@@ -17,6 +17,10 @@ const authEnvSchema = baseEnvSchema.extend({
     .string()
     .default('http://localhost:3001')
     .transform((val) => val.split(',').map((s) => s.trim())),
+  FRONTEND_URL: z
+    .string()
+    .url('FRONTEND_URL must be a valid URL')
+    .default('http://localhost:3001'),
   INTERNAL_SERVICE_SECRET: z.string().min(32),
 });
 

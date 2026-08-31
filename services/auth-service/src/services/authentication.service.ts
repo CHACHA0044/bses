@@ -19,6 +19,7 @@ import { auditService } from './audit.service';
 import { captchaService } from './captcha.service';
 import { notificationClient } from './notification.client';
 import { getPrismaClient } from '../db/db.client';
+import { config } from '../config';
 
 const logger = createLogger({ service: 'auth-service-logic' });
 
@@ -348,8 +349,9 @@ export class AuthenticationService {
     const { rawToken, hashedToken, expiresAt } = tokenService.generateResetToken();
     await userRepository.setResetPasswordToken(user.id, hashedToken, expiresAt);
 
-    // Development reset link logging
-    const resetUrl = `http://localhost:3001/reset-password?token=${rawToken}`;
+    // Reset link generated from FRONTEND_URL (env-driven) so production
+    // password-reset links point at the real frontend, not localhost.
+    const resetUrl = `${config.FRONTEND_URL}/reset-password?token=${rawToken}`;
     logger.info(`=======================================================`);
     logger.info(`[DEV NOTIFICATION SIMULATOR] PASSWORD RESET LINK GENERATED:`);
     logger.info(`Recipient: ${user.email} (${user.username})`);

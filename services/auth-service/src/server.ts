@@ -18,7 +18,7 @@ const start = async (): Promise<void> => {
 
   const app = createApp();
 
-  const server = app.listen(config.PORT, () => {
+  const server = app.listen(config.PORT, '127.0.0.1', () => {
     logger.info('Auth service running', { port: config.PORT, env: config.NODE_ENV });
   });
 
