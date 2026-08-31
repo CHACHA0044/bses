@@ -21,7 +21,7 @@ services:
     buildCommand: >
       npm install &&
       cd services/auth-service && npx prisma generate &&
-      cd ../.. && npm run build &&
+      cd ../.. && npx turbo run build &&
       cd services/auth-service && npx prisma migrate deploy
     startCommand: node apps/supervisor/dist/index.js
     healthCheckPath: /health
@@ -47,18 +47,18 @@ services:
       - key: CORS_ORIGINS
         sync: false
       - key: FRONTEND_URL
-        value: "https://bses-gateway.vercel.app"
+        value: 'https://bses-gateway.vercel.app'
       - key: NOTIFICATION_SERVICE_URL
-        value: "http://127.0.0.1:3013"
+        value: 'http://127.0.0.1:3013'
       - key: MONGODB_URI
         sync: false
       - key: GRIDFS_BUCKET
         sync: false
       - key: INTERNAL_PORT_AUTH
-        value: "3010"
+        value: '3010'
       - key: INTERNAL_PORT_CONSUMER
-        value: "3011"
+        value: '3011'
       - key: INTERNAL_PORT_DOCUMENT
-        value: "3012"
+        value: '3012'
       - key: INTERNAL_PORT_NOTIFICATION
-        value: "3013"
+        value: '3013'
