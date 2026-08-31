@@ -19,7 +19,7 @@ services:
     runtime: node
     rootDir: .
     buildCommand: >
-      npm install &&
+      npm install --include=dev --legacy-peer-deps &&
       cd services/auth-service && npx prisma generate &&
       cd ../.. && npx turbo run build &&
       cd services/auth-service && npx prisma migrate deploy
