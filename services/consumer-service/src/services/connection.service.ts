@@ -5,14 +5,16 @@ import { workflowRepository } from '../repositories/workflow.repository';
 import { userRepository } from '../repositories/user.repository';
 import { auditRepository } from '../repositories/audit.repository';
 import { workflowService } from './workflow.service';
-import { encryptionService } from './encryption.service';
+import { encryptionService, toDocumentViews } from '@bses/shared';
 import { IN_PROGRESS_STATUSES, SUCCESS_STATUSES } from '../config/connectionWorkflow';
+import { getPrismaClient } from '../db/db.client';
 
 export interface ApplyConnectionDTO {
   connectionType: ConnectionType;
   requiredLoad: number;
   propertyAddress: string;
   isDraft?: boolean;
+  documentIds?: string[];
   ipAddress: string;
 }
 
@@ -25,6 +27,24 @@ export interface UpdateConnectionDTO {
 }
 
 export class ConnectionService {
+  private get prisma() {
+    return getPrismaClient();
+  }
+
+  /**
+   * Strips encrypted document columns and returns masked OCR data on every
+   * connection payload before it reaches a consumer-facing response.
+   */
+  private toSafeConnection(connection: any): any {
+    return {
+      ...connection,
+      documents: toDocumentViews(connection.documents),
+    };
+  }
+
+  private toSafeConnections(connections: any[]): any[] {
+    return connections.map((c) => this.toSafeConnection(c));
+  }
   /**
    * Generates a unique BSES Connection Application Number (e.g. BSES-2026-X89A12)
    */
@@ -57,6 +77,21 @@ export class ConnectionService {
       notes: dto.isDraft ? 'Draft application created' : 'Application created',
     });
 
+    // Attach documents uploaded during the wizard. Only the user's own
+    // unattached documents are linked — never docs already belonging to
+    // another application.
+    if (dto.documentIds && dto.documentIds.length > 0) {
+      await this.prisma.document.updateMany({
+        where: {
+          id: { in: dto.documentIds },
+          userId,
+          connectionRequestId: null,
+          deletedAt: null,
+        },
+        data: { connectionRequestId: connection.id },
+      });
+    }
+
     await auditRepository.createAuditLog({
       userId,
       performedBy: user.username,
@@ -78,7 +113,7 @@ export class ConnectionService {
   }
 
   public async getUserConnections(userId: string): Promise<any[]> {
-    return connectionRepository.findByUserId(userId);
+    return this.toSafeConnections(await connectionRepository.findByUserId(userId));
   }
 
   public async getConnectionById(userId: string, connectionId: string, isAdmin = false): Promise<any> {
@@ -89,7 +124,7 @@ export class ConnectionService {
       throw new ValidationError('Access denied to this connection application');
     }
 
-    return connection;
+    return this.toSafeConnection(connection);
   }
 
   public async updateConnection(userId: string, connectionId: string, dto: UpdateConnectionDTO): Promise<any> {
@@ -131,7 +166,7 @@ export class ConnectionService {
       );
     }
 
-    return connectionRepository.findById(connectionId);
+    return this.toSafeConnection(await connectionRepository.findById(connectionId));
   }
 
   public async getDashboardData(userId: string): Promise<any> {
@@ -139,7 +174,9 @@ export class ConnectionService {
     if (!user) throw new NotFoundError('User');
 
     const connections = await connectionRepository.findByUserId(userId);
-    const recentLogs = await auditRepository.listRecentLogs(5);
+    // Scope the activity feed to this consumer only — other users' audit logs
+    // must never appear on a consumer's dashboard.
+    const recentLogs = await auditRepository.listRecentLogs(5, userId);
 
     const decryptedMobile = user.mobileEncrypted ? encryptionService.decrypt(user.mobileEncrypted) : null;
 
@@ -161,7 +198,7 @@ export class ConnectionService {
         rejectedCount: connections.filter((c) => c.status === ConnectionStatus.REJECTED).length,
         completedCount: connections.filter((c) => c.status === ConnectionStatus.CONNECTION_COMPLETED).length,
       },
-      recentConnections: connections.slice(0, 5),
+      recentConnections: this.toSafeConnections(connections.slice(0, 5)),
       recentActivity: recentLogs,
     };
   }

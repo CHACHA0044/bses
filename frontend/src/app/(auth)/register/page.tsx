@@ -6,18 +6,31 @@ import { useRouter } from 'next/navigation';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { motion, AnimatePresence } from 'framer-motion';
+
 import {
   User, KeyRound, ShieldCheck, CheckCircle2,
-  ArrowRight, ArrowLeft, Lock, FileCheck, Phone, Building2
+  ArrowRight, ArrowLeft, Lock, FileCheck, Phone, Building2, RefreshCw,
+  Zap, UserPlus, ListChecks
 } from 'lucide-react';
 import { Navbar } from '@/components/layout/Navbar';
 import { Footer } from '@/components/layout/Footer';
 import { apiClient } from '@/lib/apiClient';
+import { warmPostLogin } from '@/lib/prefetch';
 import { useAuthStore } from '@/store/authStore';
+import { useAuthRedirect } from '@/hooks/useAuthRedirect';
+import { AuthPending } from '@/components/common/AuthPending';
 import { Button } from '@/components/ui/Button';
 import { Alert } from '@/components/ui/Alert';
+import { AlertSlot } from '@/components/ui/AlertSlot';
 import { FormField, fieldInputClass } from '@/components/ui/FormField';
+import { CustomSelect, SelectOption } from '@/components/ui/CustomSelect';
+
+const GENDER_OPTIONS: SelectOption[] = [
+  { value: 'MALE', label: 'Male' },
+  { value: 'FEMALE', label: 'Female' },
+  { value: 'OTHER', label: 'Other' },
+  { value: 'PREFER_NOT_TO_SAY', label: 'Prefer not to say' },
+];
 
 /* ────────── Zod schema ────────── */
 const schema = z
@@ -36,6 +49,8 @@ const schema = z
     meterNumber: z.string().optional(),
     dpdpConsent: z.boolean().refine((v) => v, 'DPDP consent is required'),
     privacyPolicyAccepted: z.boolean().refine((v) => v, 'Privacy Policy acceptance is required'),
+    captchaToken: z.string().min(1, 'CAPTCHA token is required'),
+    captchaInput: z.string().trim().min(1, 'Please enter the CAPTCHA code shown in the image'),
   })
   .refine((d) => d.password === d.confirmPassword, { message: 'Passwords do not match', path: ['confirmPassword'] });
 
@@ -72,11 +87,9 @@ function StepProgress({ current }: { current: number }) {
               {/* Track segment between dots */}
               {i < STEPS.length - 1 && (
                 <div className="flex-1 h-1 mx-1 rounded-full overflow-hidden bg-slate-200">
-                  <motion.div
-                    className="h-full bg-emerald-500"
-                    initial={{ width: '0%' }}
-                    animate={{ width: done ? '100%' : '0%' }}
-                    transition={{ duration: 0.4, ease: 'easeInOut' }}
+                  <div
+                    className="h-full bg-emerald-500 transition-[width] duration-[400ms] ease-in-out"
+                    style={{ width: done ? '100%' : '0%' }}
                   />
                 </div>
               )}
@@ -97,16 +110,50 @@ function StepProgress({ current }: { current: number }) {
 export default function RegisterPage() {
   const router = useRouter();
   const setUser = useAuthStore((s) => s.setUser);
+  const { pending } = useAuthRedirect();
   const [currentStep, setCurrentStep] = useState(1);
   const [serverError, setServerError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
   const [isRedirecting, setIsRedirecting] = useState(false);
 
-  const { register, handleSubmit, trigger, formState: { errors, isSubmitting } } = useForm<FormData>({
+  const [captcha, setCaptcha] = React.useState<{ captchaToken: string; captchaSvg: string } | null>(null);
+  const [captchaLoading, setCaptchaLoading] = React.useState(false);
+
+  const { register, handleSubmit, trigger, setValue, watch, formState: { errors, isSubmitting } } = useForm<FormData>({
     resolver: zodResolver(schema),
-    defaultValues: { gender: 'MALE', dpdpConsent: false, privacyPolicyAccepted: false },
+    defaultValues: { dpdpConsent: false, privacyPolicyAccepted: false, captchaToken: '', captchaInput: '' },
     mode: 'onTouched',
   });
+
+  const fetchCaptcha = React.useCallback(async () => {
+    setCaptchaLoading(true);
+    try {
+      const res = await apiClient.get('/auth/captcha');
+      if (res.data?.success) {
+        setCaptcha(res.data.data);
+        setValue('captchaToken', res.data.data.captchaToken, { shouldValidate: true });
+        setValue('captchaInput', '');
+      }
+    } catch (err) {
+      // Fallback
+    } finally {
+      setCaptchaLoading(false);
+    }
+  }, [setValue]);
+
+  // Fetch the CAPTCHA only when the user actually reaches the final
+  // registration step that needs it — not on page load. This stops us firing
+  // auth requests while a viewer is merely looking at the page, and prevents
+  // the gateway's global per-IP rate limiter from being exhausted by repeated
+  // mounts, StrictMode double-invocation, or Fast Refresh cycles.
+  // The ref guard also avoids double-fetching when StrictMode re-runs effects.
+  const captchaRequestedRef = React.useRef(false);
+  React.useEffect(() => {
+    if (currentStep === 3 && !captchaRequestedRef.current) {
+      captchaRequestedRef.current = true;
+      fetchCaptcha();
+    }
+  }, [currentStep, fetchCaptcha]);
 
   const goNext = async () => {
     const fields: Record<number, (keyof FormData)[]> = {
@@ -122,17 +169,32 @@ export default function RegisterPage() {
   const onSubmit = async (data: FormData) => {
     setServerError(null);
     try {
-      const res = await apiClient.post('/auth/register', data);
+      const res = await apiClient.post('/auth/register', data, { timeout: 8000 });
       if (res.data.success) {
         setIsRedirecting(true);
         setUser(res.data.data.user);
+        warmPostLogin(res.data.data.user.role);
         setSuccess(true);
         router.replace('/dashboard');
       }
     } catch (err: any) {
       setServerError(err?.response?.data?.error?.message || 'Registration failed. Please try again.');
+      fetchCaptcha();
     }
   };
+
+  /* ── Session unknown / already authenticated — never flash the form ── */
+  if (pending && !success) {
+    return (
+      <div className="flex min-h-screen flex-col bg-slate-50">
+        <Navbar />
+        <div className="flex flex-1 items-center justify-center px-4">
+          <AuthPending />
+        </div>
+        <Footer />
+      </div>
+    );
+  }
 
   /* ── Success screen ── */
   if (success) {
@@ -140,13 +202,13 @@ export default function RegisterPage() {
       <div className="flex min-h-screen flex-col bg-slate-50">
         <Navbar />
         <div className="flex flex-1 items-center justify-center p-6 py-20">
-          <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="max-w-sm w-full bg-white rounded-3xl border border-slate-200 shadow-xl p-8 text-center space-y-5">
+          <div className="animate-in fade-in zoom-in-95 duration-200 max-w-sm w-full bg-white rounded-3xl border border-slate-200 shadow-xl p-8 text-center space-y-5">
             <div className="mx-auto h-16 w-16 rounded-full bg-emerald-100 flex items-center justify-center">
               <CheckCircle2 className="h-9 w-9 text-emerald-600" />
             </div>
             <h2 className="font-heading text-2xl font-extrabold text-slate-900">Account Created!</h2>
             <p className="text-sm text-slate-500 leading-relaxed">Redirecting you to your consumer dashboard…</p>
-          </motion.div>
+          </div>
         </div>
         <Footer />
       </div>
@@ -176,16 +238,37 @@ export default function RegisterPage() {
       <Navbar />
 
       {/* ── Navy hero band — brand anchor ── */}
-      <section className="w-full bses-gradient-hero text-white py-10 lg:py-14 relative overflow-hidden">
+      <section className="w-full bses-gradient-hero text-white relative overflow-hidden">
         <div className="pointer-events-none absolute inset-0 opacity-[0.04]" style={{ backgroundImage: 'linear-gradient(rgba(255,255,255,.5) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.5) 1px, transparent 1px)', backgroundSize: '40px 40px' }} />
         <div className="pointer-events-none absolute -right-24 -top-24 h-72 w-72 rounded-full bg-amber-500/10 blur-3xl" />
-        <div className="page-container relative z-10 space-y-3">
-          <h1 className="font-heading text-2xl sm:text-3xl lg:text-4xl font-extrabold tracking-tight text-white leading-tight">
-            New Consumer Registration
-          </h1>
-          <p className="text-slate-300 text-sm sm:text-base max-w-2xl leading-relaxed">
-            Apply for a power connection in 3 steps. Your documents and PII are encrypted under DPDP Act 2023.
+        <div className="page-container relative z-10 py-6 sm:py-8 lg:py-14 space-y-4">
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-amber-500 text-slate-950 shadow-lg">
+              <UserPlus className="h-5 w-5" />
+            </div>
+            <div className="space-y-0.5">
+              <p className="inline-flex items-center gap-1.5 text-[10px] font-bold text-amber-300 uppercase tracking-wider">
+                <Zap className="h-3 w-3 fill-amber-400" /> BSES Consumer Portal
+              </p>
+              <h1 className="font-heading text-lg sm:text-2xl lg:text-3xl font-extrabold leading-tight text-white">
+                New Consumer Registration
+              </h1>
+            </div>
+          </div>
+          <p className="text-slate-300 text-xs sm:text-sm lg:text-base max-w-2xl leading-relaxed">
+            Apply for a power connection in 3 easy steps. Your documents and PII are AES-256 encrypted under DPDP Act 2023.
           </p>
+          <div className="grid grid-cols-3 gap-2 pt-0.5 max-w-lg">
+            <div className="rounded-xl border border-white/10 bg-white/5 px-2.5 py-2">
+              <p className="flex items-center gap-1 text-[10px] font-bold text-white font-heading"><ListChecks className="h-3 w-3 text-amber-400" />3 Easy Steps</p>
+            </div>
+            <div className="rounded-xl border border-white/10 bg-white/5 px-2.5 py-2">
+              <p className="flex items-center gap-1 text-[10px] font-bold text-white font-heading"><Lock className="h-3 w-3 text-amber-400" />AES-256 Safe</p>
+            </div>
+            <div className="rounded-xl border border-white/10 bg-white/5 px-2.5 py-2">
+              <p className="flex items-center gap-1 text-[10px] font-bold text-white font-heading"><Phone className="h-3 w-3 text-amber-400" />19123 Help</p>
+            </div>
+          </div>
         </div>
       </section>
 
@@ -216,9 +299,12 @@ export default function RegisterPage() {
 
           {/* ── Right form panel ── */}
           <div className="lg:col-span-9 xl:col-span-8 space-y-4">
-            {serverError && (
-              <Alert type="error" onClose={() => setServerError(null)}>{serverError}</Alert>
-            )}
+            {/* space-y-4 = 16px gap; AlertSlot matches it so the form never snaps. */}
+            <AlertSlot show={!!serverError} gap={16}>
+              {serverError && (
+                <Alert type="error" onClose={() => setServerError(null)}>{serverError}</Alert>
+              )}
+            </AlertSlot>
 
             <form onSubmit={handleSubmit(onSubmit)} noValidate>
                 {/* ── STEP 1 ── */}
@@ -240,13 +326,15 @@ export default function RegisterPage() {
                         </FormField>
                       </div>
                       <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
-                        <FormField label="Gender" htmlFor="gender" required>
-                          <select id="gender" {...register('gender')} className={fieldInputClass()}>
-                            <option value="MALE">Male</option>
-                            <option value="FEMALE">Female</option>
-                            <option value="OTHER">Other</option>
-                            <option value="PREFER_NOT_TO_SAY">Prefer not to say</option>
-                          </select>
+                        <FormField label="Gender" htmlFor="gender" required error={errors.gender?.message}>
+                          <CustomSelect
+                            id="gender"
+                            options={GENDER_OPTIONS}
+                            value={watch('gender')}
+                            onChange={(val) => setValue('gender', val as any, { shouldValidate: true, shouldTouch: true })}
+                            placeholder="Select gender"
+                            hasError={!!errors.gender}
+                          />
                         </FormField>
                         <FormField label="Aadhaar Number" htmlFor="aadhaar" hint="Optional — encrypted at rest under DPDP 2023">
                           <input id="aadhaar" {...register('aadhaar')} className={fieldInputClass()} placeholder="12-digit Aadhaar" />
@@ -309,6 +397,43 @@ export default function RegisterPage() {
                           <input id="meterNumber" {...register('meterNumber')} className={fieldInputClass()} placeholder="MTR998877" />
                         </FormField>
                       </div>
+                    </div>
+
+                    {/* CAPTCHA Verification */}
+                    <div className="rounded-3xl border border-slate-200 bg-white p-6 sm:p-8 shadow-sm space-y-4">
+                      <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                        <label className="font-heading font-extrabold text-slate-900 text-sm">
+                          CAPTCHA Verification <span className="text-rose-500">*</span>
+                        </label>
+                        <button
+                          type="button"
+                          onClick={fetchCaptcha}
+                          disabled={captchaLoading}
+                          className="inline-flex items-center gap-1 text-xs font-bold text-primary hover:underline cursor-pointer"
+                        >
+                          <RefreshCw className={`h-3.5 w-3.5 ${captchaLoading ? 'animate-spin' : ''}`} /> Refresh Code
+                        </button>
+                      </div>
+
+                      <div className="flex flex-col sm:flex-row items-center gap-4">
+                        {captcha?.captchaSvg ? (
+                          <div dangerouslySetInnerHTML={{ __html: captcha.captchaSvg }} className="shrink-0" />
+                        ) : (
+                          <div className="h-12 w-40 rounded-xl bg-slate-100 animate-pulse flex items-center justify-center text-xs text-slate-400 font-bold">
+                            Loading CAPTCHA...
+                          </div>
+                        )}
+                        <div className="flex-1 w-full">
+                          <input
+                            id="captchaInput"
+                            {...register('captchaInput')}
+                            className={fieldInputClass(!!errors.captchaInput)}
+                            placeholder="Enter 5-character code"
+                            autoCapitalize="characters"
+                          />
+                        </div>
+                      </div>
+                      {errors.captchaInput && <p className="text-xs font-bold text-error">{errors.captchaInput.message}</p>}
                     </div>
 
                     {/* Consent */}

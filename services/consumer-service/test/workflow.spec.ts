@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { ConnectionStatus, UserRole, WorkflowActionType } from '@prisma/client';
+import { ConnectionStatus, ConnectionType, UserRole, WorkflowActionType } from '@prisma/client';
 import { WorkflowError } from '@bses/shared';
 import { connectionWorkflow, ADMIN_ROLES, WORKFLOW_ACTION_LABELS } from '../src/config/connectionWorkflow';
 import {
@@ -10,6 +10,7 @@ import {
   scheduleConnectionSchema,
 } from '../src/validators/workflow.validator';
 import { requireAdmin, requireConsumer } from '../src/middlewares/auth.middleware';
+import { assessDocumentCompleteness, REQUIRED_DOCUMENT_GROUPS } from '../src/config/requiredDocuments';
 
 describe('Connection Workflow Configuration', () => {
   it('is a terminal state for REJECTED and CONNECTION_COMPLETED', () => {
@@ -44,6 +45,27 @@ describe('Connection Workflow Configuration', () => {
     expect(() =>
       connectionWorkflow.assertTransition(ConnectionStatus.DOCUMENTS_PENDING, ConnectionStatus.UNDER_VERIFICATION, UserRole.CONSUMER),
     ).not.toThrow();
+  });
+
+  it('auto-holds a submission to DOCUMENTS_PENDING when required documents are missing', () => {
+    expect(() =>
+      connectionWorkflow.assertTransition(ConnectionStatus.DRAFT, ConnectionStatus.DOCUMENTS_PENDING, UserRole.CONSUMER),
+    ).not.toThrow();
+  });
+
+  it('keeps DOCUMENTS_PENDING when re-submitting with documents still missing', () => {
+    expect(() =>
+      connectionWorkflow.assertTransition(ConnectionStatus.DOCUMENTS_PENDING, ConnectionStatus.DOCUMENTS_PENDING, UserRole.CONSUMER),
+    ).not.toThrow();
+  });
+
+  it('gates the auto-hold transitions away from admins', () => {
+    expect(() =>
+      connectionWorkflow.assertTransition(ConnectionStatus.DRAFT, ConnectionStatus.DOCUMENTS_PENDING, UserRole.ADMIN),
+    ).toThrow(WorkflowError);
+    expect(() =>
+      connectionWorkflow.assertTransition(ConnectionStatus.DOCUMENTS_PENDING, ConnectionStatus.DOCUMENTS_PENDING, UserRole.ADMIN),
+    ).toThrow(WorkflowError);
   });
 
   it('gates consumer-only transitions away from admins', () => {
@@ -102,6 +124,68 @@ describe('Connection Workflow Configuration', () => {
     for (const action of actions) {
       expect(WORKFLOW_ACTION_LABELS[action as WorkflowActionType]).toBeTruthy();
     }
+  });
+});
+
+describe('Required Document Completeness Gate', () => {
+  const baseDoc = (overrides: Partial<{ documentType: string; documentName: string; isUnreadable: boolean; needsReview: boolean }>) => ({
+    documentName: 'doc.pdf',
+    ...overrides,
+  });
+
+  it('declares identity and ownership/address groups for every connection type', () => {
+    for (const type of Object.values(ConnectionType)) {
+      const groups = REQUIRED_DOCUMENT_GROUPS[type];
+      expect(groups.length).toBe(2);
+    }
+  });
+
+  it('is incomplete when no documents are attached', () => {
+    const result = assessDocumentCompleteness([], ConnectionType.DOMESTIC);
+    expect(result.complete).toBe(false);
+    expect(result.issues.length).toBe(2);
+    expect(result.issues[0]).toContain('Identity Proof');
+    expect(result.issues[1]).toContain('Ownership');
+  });
+
+  it('is complete when identity + ownership docs are acceptable', () => {
+    const docs = [
+      baseDoc({ documentType: 'AADHAAR_CARD', documentName: 'aadhaar.jpg' }),
+      baseDoc({ documentType: 'OWNERSHIP_PROOF', documentName: 'lease.pdf' }),
+    ];
+    const result = assessDocumentCompleteness(docs, ConnectionType.DOMESTIC);
+    expect(result.complete).toBe(true);
+    expect(result.issues).toEqual([]);
+  });
+
+  it('accepts an alternative type within a group (PAN in place of Aadhaar)', () => {
+    const docs = [
+      baseDoc({ documentType: 'PAN_CARD', documentName: 'pan.jpg' }),
+      baseDoc({ documentType: 'ADDRESS_PROOF', documentName: 'bill.pdf' }),
+    ];
+    const result = assessDocumentCompleteness(docs, ConnectionType.DOMESTIC);
+    expect(result.complete).toBe(true);
+  });
+
+  it('flags a group when its only upload is unreadable or flagged for review', () => {
+    const docs = [
+      baseDoc({ documentType: 'AADHAAR_CARD', documentName: 'aadhaar.jpg', isUnreadable: true }),
+      baseDoc({ documentType: 'OWNERSHIP_PROOF', documentName: 'lease.pdf' }),
+    ];
+    const result = assessDocumentCompleteness(docs, ConnectionType.DOMESTIC);
+    expect(result.complete).toBe(false);
+    expect(result.issues[0]).toContain('Identity Proof');
+    expect(result.issues[0]).toContain('flagged for review');
+  });
+
+  it('accepts a readable duplicate when another copy of the same type is flagged', () => {
+    const docs = [
+      baseDoc({ documentType: 'AADHAAR_CARD', documentName: 'blurry.jpg', needsReview: true }),
+      baseDoc({ documentType: 'AADHAAR_CARD', documentName: 'clear.jpg' }),
+      baseDoc({ documentType: 'OWNERSHIP_PROOF', documentName: 'lease.pdf' }),
+    ];
+    const result = assessDocumentCompleteness(docs, ConnectionType.DOMESTIC);
+    expect(result.complete).toBe(true);
   });
 });
 

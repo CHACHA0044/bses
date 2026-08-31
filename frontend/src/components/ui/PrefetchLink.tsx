@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import Link from 'next/link';
 import { usePrefetch } from '@/hooks/usePrefetch';
 import { cn } from '@/lib/utils';
 
@@ -12,7 +13,7 @@ export interface PrefetchLinkProps extends React.AnchorHTMLAttributes<HTMLAnchor
 }
 
 /**
- * PrefetchLink — an <a> that warms its destination the instant the user
+ * PrefetchLink — a Next.js Link that warms its destination the instant the user
  * signals intent (hover / keyboard focus / touch), so the click itself feels
  * instant. Route chunks go through Next.js router.prefetch; the optional
  * dataUrls fill the shared useApiResource cache the destination page reads.
@@ -27,7 +28,7 @@ export const PrefetchLink = React.forwardRef<HTMLAnchorElement, PrefetchLinkProp
     const { prefetchRoute } = usePrefetch();
 
     return (
-      <a
+      <Link
         ref={ref}
         href={href}
         className={cn(className)}
@@ -46,7 +47,7 @@ export const PrefetchLink = React.forwardRef<HTMLAnchorElement, PrefetchLinkProp
         {...props}
       >
         {children}
-      </a>
+      </Link>
     );
   },
 );

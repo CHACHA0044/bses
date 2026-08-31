@@ -2,6 +2,7 @@ import React from 'react';
 import Link from 'next/link';
 import { Logo } from '../common/Logo';
 import { ShieldCheck, Phone, Mail, MapPin, ExternalLink } from 'lucide-react';
+import { FooterConsumerLinks } from './FooterConsumerLinks';
 
 export const Footer: React.FC = () => {
   return (
@@ -13,7 +14,7 @@ export const Footer: React.FC = () => {
             <Logo size="sm" />
           </div>
           <p className="text-slate-400 leading-relaxed">
-            Official Electricity Consumer Service &amp; Digital Connection Management Portal for BSES Rajdhani Power Limited (BRPL) and BSES Yamuna Power Limited (BYPL).
+            Unofficial Electricity Consumer Service &amp; Digital Connection Management Portal for BSES Rajdhani Power Limited (BRPL) and BSES Yamuna Power Limited (BYPL).
           </p>
           <span className="inline-flex items-center gap-1.5 rounded-full border border-success/20 bg-success/10 px-2.5 py-1 text-[11px] font-semibold text-green-400">
             <ShieldCheck className="h-3.5 w-3.5" />
@@ -21,15 +22,10 @@ export const Footer: React.FC = () => {
           </span>
         </div>
 
-        {/* Col 2: Consumer Services */}
+        {/* Col 2: Consumer Services (Server shell + small client island) */}
         <div className="space-y-3">
           <h4 className="font-heading font-bold text-white uppercase text-xs tracking-wider">Consumer Services</h4>
-          <ul className="space-y-2 text-slate-400">
-            <li><Link href="/connections/apply" className="hover:text-accent transition">New Connection Application</Link></li>
-            <li><Link href="/connections" className="hover:text-accent transition">Track Application Status</Link></li>
-            <li><Link href="/profile" className="hover:text-accent transition">Consumer Profile</Link></li>
-            <li><Link href="/help-center" className="hover:text-accent transition">Helpline &amp; FAQs</Link></li>
-          </ul>
+          <FooterConsumerLinks />
         </div>
 
         {/* Col 3: Legal */}
@@ -41,7 +37,7 @@ export const Footer: React.FC = () => {
             <li><Link href="/about" className="hover:text-accent transition">Architecture &amp; Security</Link></li>
             <li>
               <a href="https://www.bsesdelhi.com" target="_blank" rel="noreferrer" className="hover:text-accent transition inline-flex items-center gap-1">
-                BSES Official Portal <ExternalLink className="h-3 w-3" />
+                BSES Portal <ExternalLink className="h-3 w-3" />
               </a>
             </li>
           </ul>

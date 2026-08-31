@@ -29,8 +29,9 @@ export class AuditRepository {
     });
   }
 
-  public async listRecentLogs(limit = 10): Promise<AuditLog[]> {
+  public async listRecentLogs(limit = 10, userId?: string): Promise<AuditLog[]> {
     return this.prisma.auditLog.findMany({
+      where: userId ? { userId } : {},
       take: limit,
       orderBy: { timestamp: 'desc' },
     });

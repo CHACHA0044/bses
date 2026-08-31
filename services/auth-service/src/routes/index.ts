@@ -5,6 +5,7 @@ import { authenticate, optionalAuth } from '../middlewares/auth.middleware';
 const router = Router();
 
 // Public Authentication Endpoints
+router.get('/captcha', authController.getCaptcha);
 router.post('/register', authController.register);
 router.post('/login', authController.login);
 router.post('/refresh', authController.refresh);

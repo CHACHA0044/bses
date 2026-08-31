@@ -46,6 +46,8 @@ export const registerSchema = z.object({
     .or(z.literal('')),
   dpdpConsent: z.boolean().refine((val) => val === true, 'Explicit DPDP consent is required'),
   privacyPolicyAccepted: z.boolean().refine((val) => val === true, 'Privacy policy acceptance is required'),
+  captchaToken: z.string().min(1, 'CAPTCHA token is required'),
+  captchaInput: z.string().trim().min(1, 'CAPTCHA answer is required'),
 });
 
 export const loginSchema = z.object({

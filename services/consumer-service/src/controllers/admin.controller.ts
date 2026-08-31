@@ -41,6 +41,50 @@ export class AdminController {
       next(err);
     }
   };
+
+  public getUserDetail = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const { id } = req.params;
+      const adminActor = { sub: req.user!.sub, ip: req.ip || '127.0.0.1' };
+      const data = await adminService.getUserDetail(id!, adminActor);
+      sendSuccess(res, data);
+    } catch (err) {
+      next(err);
+    }
+  };
+
+  public updateUser = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const { id } = req.params;
+      const data = await adminService.updateUser(id!, req.body);
+      sendSuccess(res, data, 'User updated successfully');
+    } catch (err) {
+      next(err);
+    }
+  };
+
+  public changeUserStatus = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const { id } = req.params;
+      const { status } = req.body;
+      const data = await adminService.changeUserStatus(id!, status);
+      sendSuccess(res, data, 'User status updated successfully');
+    } catch (err) {
+      next(err);
+    }
+  };
+
+  public exportUserData = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const { id } = req.params;
+      const adminActor = { sub: req.user!.sub, ip: req.ip || '127.0.0.1' };
+      const data = await adminService.exportUserData(id!, adminActor);
+      sendSuccess(res, data);
+    } catch (err) {
+      next(err);
+    }
+  };
 }
 
 export const adminController = new AdminController();
+

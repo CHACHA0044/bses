@@ -1,11 +1,10 @@
 'use client';
 
-import React from 'react';
+import React, { useLayoutEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useAuth } from '@/hooks/useAuth';
-import { navItemBase } from '@/components/ui/InteractionProps';
-import { motion } from 'framer-motion';
+import { navItemBase, pressedState } from '@/components/ui/InteractionProps';
 import {
   LayoutDashboard,
   FilePlus,
@@ -45,6 +44,28 @@ export const Sidebar: React.FC = () => {
   const isAdmin = user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN';
   const items = isAdmin ? adminNavItems : consumerNavItems;
 
+  const activeHref = items.find((item) => isNavActive(item.href, item.exact, pathname))?.href;
+
+  const navRef = useRef<HTMLElement>(null);
+  const itemRefs = useRef(new Map<string, HTMLAnchorElement | null>());
+  const [pillStyle, setPillStyle] = useState<{ top: number; height: number } | null>(null);
+
+  // Measure the active item's position inside the nav so the sliding pill can
+  // be driven purely by CSS transforms — same visual as the previous
+  // framer-motion layout animation, without shipping the motion runtime into
+  // every protected route.
+  useLayoutEffect(() => {
+    const nav = navRef.current;
+    const activeEl = activeHref ? itemRefs.current.get(activeHref) : null;
+    if (!nav || !activeEl) {
+      setPillStyle(null);
+      return;
+    }
+    const navRect = nav.getBoundingClientRect();
+    const elRect = activeEl.getBoundingClientRect();
+    setPillStyle({ top: elRect.top - navRect.top, height: elRect.height });
+  }, [activeHref]);
+
   return (
     <aside className="w-56 lg:w-64 h-full p-3 flex flex-col justify-between select-none">
       <div className="flex flex-col flex-1 min-h-0 space-y-4">
@@ -52,7 +73,20 @@ export const Sidebar: React.FC = () => {
           {isAdmin ? 'Administration Portal' : 'Consumer Services'}
         </div>
 
-        <nav className="flex-1 space-y-0.5 overflow-y-auto" aria-label="Sidebar navigation">
+        <nav ref={navRef} className="relative flex-1 space-y-0.5 overflow-y-auto" aria-label="Sidebar navigation">
+          {/* Animated active background — one shared pill that slides between items */}
+          <span
+            aria-hidden
+            className="pointer-events-none absolute left-0 right-0 bg-surface-dark rounded-xl"
+            style={{
+              top: 0,
+              transform: pillStyle ? `translateY(${pillStyle.top}px)` : 'translateY(-100%)',
+              height: pillStyle?.height ?? 0,
+              transition:
+                'transform 300ms cubic-bezier(0.22, 1, 0.36, 1), height 300ms cubic-bezier(0.22, 1, 0.36, 1)',
+            }}
+          />
+
           {items.map((item) => {
             const Icon = item.icon;
             const active = isNavActive(item.href, item.exact, pathname);
@@ -62,8 +96,12 @@ export const Sidebar: React.FC = () => {
                 key={item.href}
                 href={item.href}
                 prefetch={true}
+                ref={(el) => {
+                  itemRefs.current.set(item.href, el);
+                }}
                 className={[
                   navItemBase,
+                  pressedState,
                   'relative rounded-xl group overflow-hidden',
                   active
                     ? 'text-white shadow-sm'
@@ -71,15 +109,6 @@ export const Sidebar: React.FC = () => {
                 ].join(' ')}
                 aria-current={active ? 'page' : undefined}
               >
-                {/* Animated active background */}
-                {active && (
-                  <motion.span
-                    layoutId="sidebar-active-pill"
-                    className="absolute inset-0 bg-surface-dark rounded-xl"
-                    transition={{ type: 'spring', stiffness: 380, damping: 34, mass: 0.8 }}
-                  />
-                )}
-
                 <span className="relative z-10 flex items-center gap-3 w-full">
                   <Icon
                     className={[

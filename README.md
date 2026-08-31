@@ -5,7 +5,7 @@ A production-quality enterprise web application for BSES electricity consumers �
 ## Architecture
 
 A **Turborepo monorepo** (back end) with a **standalone frontend** that deploys independently on Vercel.
-
+lets create another logi
 ```
 bses/
 ├── frontend/               # Next.js 14 (App Router) — consumer-facing frontend

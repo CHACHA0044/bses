@@ -12,14 +12,21 @@
   },
   "dependencies": {
     "@bses/shared": "*",
-    "@prisma/client": "^5.16.1",
-    "cors": "^2.8.5",
+    "@prisma/adapter-pg": "^7.0.0",
+    "@prisma/client": "^7.0.0",
     "cookie-parser": "^1.4.6",
+    "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
     "helmet": "^7.1.0",
+    "jsqr": "1.4.0",
     "mongodb": "^6.8.0",
     "multer": "^1.4.5-lts.1",
+    "p-limit": "5.0.0",
+    "pdf-parse": "2.4.5",
+    "pg": "^8.13.1",
+    "sharp": "^0.33.5",
+    "tesseract.js": "7.0.0",
     "zod": "^3.23.8"
   },
   "devDependencies": {
@@ -28,6 +35,8 @@
     "@types/express": "^4.17.21",
     "@types/multer": "^1.4.11",
     "@types/node": "^20.14.0",
+    "@types/qrcode": "1.5.6",
+    "qrcode": "1.5.4",
     "rimraf": "^5.0.7",
     "ts-node-dev": "^2.0.0",
     "typescript": "^5.5.2"

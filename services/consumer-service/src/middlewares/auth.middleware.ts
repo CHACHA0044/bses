@@ -21,7 +21,7 @@ export const authenticate = (req: Request, _res: Response, next: NextFunction): 
       throw new AuthenticationError('Authentication required');
     }
 
-    const payload = jwt.verify(token, process.env['JWT_SECRET'] || 'secret') as JwtAccessPayload;
+    const payload = jwt.verify(token, config.JWT_SECRET) as JwtAccessPayload;
     req.user = payload;
     next();
   } catch (err) {

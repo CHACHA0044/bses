@@ -1,0 +1,60 @@
+# Render Blueprint — BSES Backend (Single Web Service)
+#
+# Runs the ENTIRE backend (gateway + auth + consumer + document + notification)
+# inside ONE Render Web Service. The supervisor (apps/supervisor) forks each
+# logical service as an isolated child process. Only the gateway binds the
+# public port; all services communicate over 127.0.0.1 loopback.
+#
+# Database (PostgreSQL) and MongoDB (GridFS) are external and provisioned OUTSIDE
+# this file (Render Postgres + MongoDB Atlas). Prisma migrations are owned by
+# auth-service and run once during the build.
+#
+# Deploy: from the repo root, connect your GitHub repo, set rootDir appropriately
+# (Render rootDir here is the repo root ".") — or paste this into
+# Render > New Blueprint.
+
+services:
+  - type: web
+    name: bses-backend
+    runtime: node
+    rootDir: .
+    buildCommand: >
+      npm install &&
+      cd services/auth-service && npx prisma generate &&
+      cd ../.. && npm run build &&
+      cd services/auth-service && npx prisma migrate deploy
+    startCommand: node apps/supervisor/dist/index.js
+    healthCheckPath: /health
+    autoDeploy: true
+    plan: free
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: JWT_REFRESH_SECRET
+        sync: false
+      - key: COOKIE_SECRET
+        sync: false
+      - key: AES_SECRET_KEY
+        sync: false
+      - key: AES_IV
+        sync: false
+      - key: INTERNAL_SERVICE_SECRET
+        sync: false
+      - key: CORS_ORIGINS
+        sync: false
+      - key: MONGODB_URI
+        sync: false
+      - key: GRIDFS_BUCKET
+        sync: false
+      - key: INTERNAL_PORT_AUTH
+        value: "3010"
+      - key: INTERNAL_PORT_CONSUMER
+        value: "3011"
+      - key: INTERNAL_PORT_DOCUMENT
+        value: "3012"
+      - key: INTERNAL_PORT_NOTIFICATION
+        value: "3013"

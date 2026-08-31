@@ -7,17 +7,23 @@ export const ADMIN_ROLES: string[] = [UserRole.ADMIN, UserRole.SUPER_ADMIN];
  * Connection application state machine.
  *
  *   DRAFT ──SUBMIT──► SUBMITTED ──ASSIGN──► ASSIGNED ──START_VERIFICATION──► UNDER_VERIFICATION ──COMPLETE_VERIFICATION──► VERIFICATION_COMPLETE ──APPROVE──► APPROVED ──SCHEDULE_CONNECTION──► CONNECTION_SCHEDULED ──COMPLETE_CONNECTION──► CONNECTION_COMPLETED
- *                                  │                    │                            │
- *                                  ├──REASSIGN──► ASSIGNED ◄──REASSIGN───────────────┘
- *                                  └─────── REJECT ────────┴──────► REJECTED (terminal)
+ *     │ │                                  │                    │                            │
+ *     │ └──SUBMIT (docs missing)──► DOCUMENTS_PENDING          │                            │
+ *     │                          ▲        │                    ├──REASSIGN──► ASSIGNED ◄──REASSIGN───────────────┘
+ *     │                          │        └──SUBMIT (still missing)──► DOCUMENTS_PENDING   └─────── REJECT ────────┴──────► REJECTED (terminal)
+ *     │                          └──SUBMIT (re-upload OK)──► UNDER_VERIFICATION
  *     UNDER_VERIFICATION ──REQUEST_DOCUMENTS──► DOCUMENTS_PENDING ──SUBMIT (consumer re-upload)──► UNDER_VERIFICATION
  *     VERIFICATION_COMPLETE ──REJECT──► REJECTED
  */
 export const connectionTransitions: WorkflowTransitionRule<ConnectionStatus, WorkflowActionType>[] = [
   // ── Consumer actions ──
   { action: WorkflowActionType.SUBMIT, from: ConnectionStatus.DRAFT, to: ConnectionStatus.SUBMITTED, roles: [UserRole.CONSUMER], label: 'Submit application' },
+  // Auto-held submission: required documents missing / flagged at submit time.
+  { action: WorkflowActionType.SUBMIT, from: ConnectionStatus.DRAFT, to: ConnectionStatus.DOCUMENTS_PENDING, roles: [UserRole.CONSUMER], label: 'Submit with documents pending' },
   // Re-submission after documents were requested
   { action: WorkflowActionType.SUBMIT, from: ConnectionStatus.DOCUMENTS_PENDING, to: ConnectionStatus.UNDER_VERIFICATION, roles: [UserRole.CONSUMER], label: 'Re-submit with documents' },
+  // Re-submission while required documents are STILL missing/flagged (stays pending).
+  { action: WorkflowActionType.SUBMIT, from: ConnectionStatus.DOCUMENTS_PENDING, to: ConnectionStatus.DOCUMENTS_PENDING, roles: [UserRole.CONSUMER], label: 'Re-submit (documents still pending)' },
 
   // ── Admin assignment ──
   { action: WorkflowActionType.ASSIGN, from: ConnectionStatus.SUBMITTED, to: ConnectionStatus.ASSIGNED, roles: ADMIN_ROLES, label: 'Assign officer' },

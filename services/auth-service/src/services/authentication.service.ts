@@ -12,10 +12,12 @@ import { userRepository, CreateUserData } from '../repositories/user.repository'
 import { adminRepository } from '../repositories/admin.repository';
 import { refreshTokenRepository } from '../repositories/refreshToken.repository';
 import { passwordService } from './password.service';
-import { encryptionService } from './encryption.service';
+import { encryptionService } from '@bses/shared';
 import { tokenService } from './token.service';
 import { consentService } from './consent.service';
 import { auditService } from './audit.service';
+import { captchaService } from './captcha.service';
+import { notificationClient } from './notification.client';
 import { getPrismaClient } from '../db/db.client';
 
 const logger = createLogger({ service: 'auth-service-logic' });
@@ -35,6 +37,8 @@ export interface RegisterDTO {
   meterNumber?: string | null;
   dpdpConsent: boolean;
   privacyPolicyAccepted: boolean;
+  captchaToken?: string;
+  captchaInput?: string;
   ipAddress: string;
 }
 
@@ -55,6 +59,9 @@ export class AuthenticationService {
    * Registers a new consumer user with DPDP consent and encrypted PII.
    */
   public async register(dto: RegisterDTO): Promise<{ user: any; tokens: AuthTokens }> {
+    // 0. Verify CAPTCHA
+    captchaService.verifyCaptcha(dto.captchaToken, dto.captchaInput);
+
     // 1. Validate password match & complexity
     if (dto.password !== dto.confirmPassword) {
       throw new ValidationError('Passwords do not match', { confirmPassword: ['Password confirmation does not match password'] });
@@ -140,7 +147,7 @@ export class AuthenticationService {
     const refreshTokenHash = tokenService.hashToken(refreshToken);
 
     const refreshTokenExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
-    await refreshTokenRepository.createRefreshToken(user.id, refreshTokenHash, refreshTokenExpiresAt);
+    await refreshTokenRepository.createRefreshToken({ userId: user.id, tokenHash: refreshTokenHash, expiresAt: refreshTokenExpiresAt });
 
     // 7. Audit log
     await auditService.logAction({
@@ -150,6 +157,9 @@ export class AuthenticationService {
       module: 'AUTH',
       ipAddress: dto.ipAddress,
     });
+
+    // 8. Dispatch Registration Successful Notification (SMS + WhatsApp - SRS 4.7)
+    await notificationClient.notifyRegistrationSuccess(dto.mobile, user.username);
 
     return {
       user: this.sanitizeUser(user),
@@ -179,11 +189,12 @@ export class AuthenticationService {
       const refreshToken = tokenService.generateRefreshToken(admin.id);
       const refreshTokenHash = tokenService.hashToken(refreshToken);
 
-      await refreshTokenRepository.createRefreshToken(admin.id, refreshTokenHash, new Date(Date.now() + 7 * 24 * 60 * 60 * 1000));
-      await auditService.logAction({ userId: admin.id, performedBy: admin.email, action: AuditAction.USER_LOGIN, module: 'AUTH', ipAddress: dto.ipAddress });
+      await refreshTokenRepository.createRefreshToken({ adminId: admin.id, tokenHash: refreshTokenHash, expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) });
+      // Audit logs reference users only — admin id does not exist in users (FK)
+      await auditService.logAction({ userId: null, performedBy: admin.email, action: AuditAction.USER_LOGIN, module: 'AUTH', ipAddress: dto.ipAddress });
 
       return {
-        user: { id: admin.id, name: admin.name, email: admin.email, role: admin.role },
+        user: this.sanitizeAdmin(admin),
         tokens: { accessToken, refreshToken },
       };
     }
@@ -222,7 +233,7 @@ export class AuthenticationService {
     const refreshTokenHash = tokenService.hashToken(refreshToken);
 
     const refreshTokenExpiresAt = new Date(Date.now() + (dto.rememberMe ? 30 : 7) * 24 * 60 * 60 * 1000);
-    await refreshTokenRepository.createRefreshToken(user.id, refreshTokenHash, refreshTokenExpiresAt);
+    await refreshTokenRepository.createRefreshToken({ userId: user.id, tokenHash: refreshTokenHash, expiresAt: refreshTokenExpiresAt });
 
     // 6. Audit log
     await auditService.logAction({
@@ -255,6 +266,26 @@ export class AuthenticationService {
       throw new AuthenticationError('Invalid or expired refresh token');
     }
 
+    // Admin session refresh
+    if (storedToken.adminId) {
+      const admin = await adminRepository.findById(storedToken.adminId);
+      if (!admin) {
+        throw new AuthenticationError('Admin associated with refresh token no longer exists');
+      }
+
+      const newAccessToken = tokenService.generateAccessToken({ userId: admin.id, username: admin.email, role: admin.role as any });
+      const newRefreshToken = tokenService.generateRefreshToken(admin.id);
+      const newRefreshTokenHash = tokenService.hashToken(newRefreshToken);
+
+      await refreshTokenRepository.revokeToken(storedToken.id, newRefreshTokenHash);
+      await refreshTokenRepository.createRefreshToken({ adminId: admin.id, tokenHash: newRefreshTokenHash, expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) });
+
+      return {
+        accessToken: newAccessToken,
+        refreshToken: newRefreshToken,
+      };
+    }
+
     const user = await userRepository.findById(payload.sub);
     if (!user) {
       throw new AuthenticationError('User associated with refresh token no longer exists');
@@ -267,7 +298,7 @@ export class AuthenticationService {
 
     // Revoke old token & store new token
     await refreshTokenRepository.revokeToken(storedToken.id, newRefreshTokenHash);
-    await refreshTokenRepository.createRefreshToken(user.id, newRefreshTokenHash, new Date(Date.now() + 7 * 24 * 60 * 60 * 1000));
+    await refreshTokenRepository.createRefreshToken({ userId: user.id, tokenHash: newRefreshTokenHash, expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) });
 
     return {
       accessToken: newAccessToken,
@@ -286,11 +317,16 @@ export class AuthenticationService {
         await refreshTokenRepository.revokeToken(stored.id);
       }
     } else {
-      await refreshTokenRepository.revokeAllUserTokens(userId);
+      const admin = await adminRepository.findById(userId);
+      if (admin) {
+        await refreshTokenRepository.revokeAllAdminTokens(userId);
+      } else {
+        await refreshTokenRepository.revokeAllUserTokens(userId);
+      }
     }
 
     await auditService.logAction({
-      userId,
+      userId: null,
       performedBy: userId,
       action: AuditAction.USER_LOGOUT,
       module: 'AUTH',
@@ -348,6 +384,11 @@ export class AuthenticationService {
       module: 'AUTH',
       ipAddress,
     });
+
+    if (user.mobileEncrypted) {
+      const mobile = encryptionService.decrypt(user.mobileEncrypted);
+      await notificationClient.notifyPasswordChanged(mobile);
+    }
   }
 
   /**
@@ -377,6 +418,11 @@ export class AuthenticationService {
       module: 'AUTH',
       ipAddress,
     });
+
+    if (user.mobileEncrypted) {
+      const mobile = encryptionService.decrypt(user.mobileEncrypted);
+      await notificationClient.notifyPasswordChanged(mobile);
+    }
   }
 
   /**
@@ -388,10 +434,35 @@ export class AuthenticationService {
       // Check admin
       const admin = await adminRepository.findById(userId);
       if (!admin) throw new NotFoundError('User');
-      return { id: admin.id, name: admin.name, email: admin.email, role: admin.role };
+      return this.sanitizeAdmin(admin);
     }
 
     return this.sanitizeUser(user, true);
+  }
+
+  /**
+   * Normalizes an admin into the same user shape consumers get, so the
+   * frontend `UserProfile` contract (firstName/lastName/username/status) holds
+   * for every authenticated identity. The `Admin` model only stores a single
+   * `name` field — it is split into first/last for display parity.
+   */
+  private sanitizeAdmin(admin: any): any {
+    const parts = (admin.name || '').trim().split(/\s+/);
+    const firstName = parts.shift() || admin.email;
+    const lastName = parts.join(' ') || '';
+
+    return {
+      id: admin.id,
+      firstName,
+      middleName: null,
+      lastName,
+      gender: 'OTHER',
+      email: admin.email,
+      username: admin.email,
+      role: admin.role,
+      status: 'ACTIVE',
+      createdAt: admin.createdAt,
+    };
   }
 
   /**

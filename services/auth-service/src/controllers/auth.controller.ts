@@ -1,6 +1,7 @@
 import type { Request, Response, NextFunction } from 'express';
 import { sendSuccess, sendCreated, JWT } from '@bses/shared';
 import { authenticationService } from '../services/authentication.service';
+import { captchaService } from '../services/captcha.service';
 import {
   registerSchema,
   loginSchema,
@@ -13,25 +14,37 @@ import { config } from '../config';
 export class AuthController {
   private setCookies(res: Response, accessToken: string, refreshToken: string, rememberMe = false): void {
     const isProduction = config.NODE_ENV === 'production';
+    // Cross-site cookie after deploying frontend (Vercel) and backend (Render) on
+    // different registrable domains requires SameSite=None (an enforcement of
+    // Secure). Local development stays lax. Controlled via env so behavior is
+    // explicit rather than guessed.
+    const sameSite = config.COOKIE_SAME_SITE as 'lax' | 'strict' | 'none';
 
     res.cookie(JWT.ACCESS_TOKEN_COOKIE, accessToken, {
       httpOnly: true,
-      secure: isProduction,
-      sameSite: 'lax',
+      secure: isProduction || sameSite === 'none',
+      sameSite,
       maxAge: 15 * 60 * 1000, // 15 minutes
     });
 
     res.cookie(JWT.REFRESH_TOKEN_COOKIE, refreshToken, {
       httpOnly: true,
-      secure: isProduction,
-      sameSite: 'lax',
+      secure: isProduction || sameSite === 'none',
+      sameSite,
       maxAge: (rememberMe ? 30 : 7) * 24 * 60 * 60 * 1000, // 7 or 30 days
     });
   }
 
   private clearCookies(res: Response): void {
-    res.clearCookie(JWT.ACCESS_TOKEN_COOKIE);
-    res.clearCookie(JWT.REFRESH_TOKEN_COOKIE);
+    const isProduction = config.NODE_ENV === 'production';
+    const sameSite = config.COOKIE_SAME_SITE as 'lax' | 'strict' | 'none';
+    const commonOpts = {
+      httpOnly: true,
+      secure: isProduction || sameSite === 'none',
+      sameSite,
+    };
+    res.clearCookie(JWT.ACCESS_TOKEN_COOKIE, commonOpts);
+    res.clearCookie(JWT.REFRESH_TOKEN_COOKIE, commonOpts);
   }
 
   public register = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
@@ -163,6 +176,15 @@ export class AuthController {
       sendSuccess(res, { authenticated: true, user });
     } catch (err) {
       sendSuccess(res, { authenticated: false, user: null });
+    }
+  };
+
+  public getCaptcha = async (_req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const captcha = captchaService.generateCaptcha();
+      sendSuccess(res, captcha);
+    } catch (err) {
+      next(err);
     }
   };
 }

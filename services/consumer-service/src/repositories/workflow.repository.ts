@@ -12,6 +12,11 @@ import {
 } from '@prisma/client';
 import { getPrismaClient } from '../db/db.client';
 
+// In-memory TTL cache for rarely-changing data (officers list).
+// Invalidated by time only — officers are added/removed very infrequently.
+const officersCache = new Map<string, { data: any; expiresAt: number }>();
+const OFFICERS_CACHE_TTL_MS = 60_000;
+
 export interface CreateTimelineData {
   connectionRequestId: string;
   action: WorkflowActionType;
@@ -127,7 +132,13 @@ export class WorkflowRepository {
 
   /** Assignable officers = active ADMIN / SUPER_ADMIN users. */
   public async findOfficers(): Promise<Pick<User, 'id' | 'firstName' | 'middleName' | 'lastName' | 'email' | 'username' | 'role'>[]> {
-    return this.prisma.user.findMany({
+    const cacheKey = 'officers:active';
+    const cached = officersCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached.data;
+    }
+
+    const officers = await this.prisma.user.findMany({
       where: { role: { in: ['ADMIN', 'SUPER_ADMIN'] }, status: 'ACTIVE', deletedAt: null },
       select: {
         id: true,
@@ -140,6 +151,9 @@ export class WorkflowRepository {
       },
       orderBy: { firstName: 'asc' },
     });
+
+    officersCache.set(cacheKey, { data: officers, expiresAt: Date.now() + OFFICERS_CACHE_TTL_MS });
+    return officers;
   }
 }
 

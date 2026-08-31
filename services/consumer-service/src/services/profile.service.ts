@@ -2,13 +2,16 @@ import { AuditAction } from '@prisma/client';
 import { NotFoundError, ConflictError, ValidationError } from '@bses/shared';
 import { userRepository, UpdateProfileData } from '../repositories/user.repository';
 import { auditRepository } from '../repositories/audit.repository';
-import { encryptionService } from './encryption.service';
+import { encryptionService } from '@bses/shared';
 import { notificationClient } from './notification.client';
 
 export interface UpdateProfileDTO {
   email?: string | undefined;
   mobile?: string | undefined;
   aadhaar?: string | null | undefined;
+  username?: string | undefined;
+  caNumber?: string | undefined;
+  meterNumber?: string | undefined;
   ipAddress: string;
 }
 
@@ -40,6 +43,10 @@ export class ProfileService {
   }
 
   public async updateProfile(userId: string, dto: UpdateProfileDTO): Promise<any> {
+    if (dto.username !== undefined || dto.caNumber !== undefined || dto.meterNumber !== undefined) {
+      throw new ValidationError('Restricted fields (username, caNumber, meterNumber) are read-only and cannot be modified');
+    }
+
     const user = await userRepository.findById(userId);
     if (!user) throw new NotFoundError('User profile');
 
@@ -88,7 +95,7 @@ export class ProfileService {
     // Notify user if contact info changed
     const currentMobile = dto.mobile || (user.mobileEncrypted ? encryptionService.decrypt(user.mobileEncrypted) : null);
     if (currentMobile && (updateData.email || mobileChanged)) {
-      await notificationClient.notifyProfileUpdated(currentMobile);
+      await notificationClient.notifyProfileUpdated(currentMobile, user.id);
     }
 
     return this.getProfile(userId);

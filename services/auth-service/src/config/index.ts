@@ -9,6 +9,7 @@ const authEnvSchema = baseEnvSchema.extend({
   JWT_REFRESH_SECRET: z.string().min(32, 'JWT_REFRESH_SECRET must be at least 32 characters'),
   JWT_REFRESH_EXPIRES_IN: z.string().default('7d'),
   COOKIE_SECRET: z.string().min(32, 'COOKIE_SECRET must be at least 32 characters'),
+  COOKIE_SAME_SITE: z.enum(['lax', 'strict', 'none']).default('lax'),
   BCRYPT_ROUNDS: z.coerce.number().int().min(10).max(15).default(12),
   AES_SECRET_KEY: z.string().length(64, 'AES_SECRET_KEY must be exactly 64 hex characters (32 bytes)'),
   AES_IV: z.string().length(32, 'AES_IV must be exactly 32 hex characters (16 bytes)'),

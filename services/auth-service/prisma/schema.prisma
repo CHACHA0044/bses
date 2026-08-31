@@ -4,11 +4,9 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
 }
 
 // ─── Enums ────────────────────────────────────────────────────────────────────
-
 enum UserRole {
   CONSUMER
   ADMIN
@@ -95,6 +93,8 @@ enum AuditAction {
   DOCUMENT_DELETED
   ADMIN_USER_DEACTIVATED
   ADMIN_USER_EDITED
+  ADMIN_USER_VIEWED
+  ADMIN_USER_EXPORTED
   // ── Workflow engine audit actions ──
   APPLICATION_SUBMITTED
   APPLICATION_ASSIGNED
@@ -189,16 +189,20 @@ model User {
 
 model RefreshToken {
   id              String    @id @default(cuid())
-  userId          String    @map("user_id")
+  // Exactly one of userId / adminId is set — refresh tokens for consumer vs admin sessions
+  userId          String?   @map("user_id")
+  adminId         String?   @map("admin_id")
   tokenHash       String    @unique @map("token_hash")
   expiresAt       DateTime  @map("expires_at")
   revokedAt       DateTime? @map("revoked_at")
   replacedByToken String?   @map("replaced_by_token")
   createdAt       DateTime  @default(now()) @map("created_at")
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user  User?  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  admin Admin? @relation(fields: [adminId], references: [id], onDelete: Cascade)
 
   @@index([userId])
+  @@index([adminId])
   @@index([tokenHash])
   @@map("refresh_tokens")
 }
@@ -210,6 +214,8 @@ model Admin {
   passwordHash String   @map("password_hash")
   role         UserRole @default(ADMIN)
   createdAt    DateTime @default(now()) @map("created_at")
+
+  refreshTokens RefreshToken[]
 
   @@index([email])
   @@map("admins")
@@ -349,6 +355,32 @@ model Document {
   uploadDate          DateTime       @default(now()) @map("upload_date")
   status              DocumentStatus @default(PENDING)
   deletedAt           DateTime?      @map("deleted_at")
+  
+  // OCR Data (Stored securely as encrypted fields)
+  extractedAadhaarEncrypted          String?   @map("extracted_aadhaar_encrypted")
+  extractedPanEncrypted              String?   @map("extracted_pan_encrypted")
+  extractedNameEncrypted             String?   @map("extracted_name_encrypted")
+  extractedDobEncrypted              String?   @map("extracted_dob_encrypted")
+  extractedFatherNameEncrypted       String?   @map("extracted_father_name_encrypted")
+  extractedLicenseNumberEncrypted    String?   @map("extracted_license_number_encrypted")
+  extractedAddressEncrypted          String?   @map("extracted_address_encrypted")
+  extractedValidityEncrypted         String?   @map("extracted_validity_encrypted")
+  extractedPinCodeEncrypted          String?   @map("extracted_pin_code_encrypted")
+  extractedStateEncrypted            String?   @map("extracted_state_encrypted")
+  extractedDistrictEncrypted         String?   @map("extracted_district_encrypted")
+  extractedIssueDateEncrypted        String?   @map("extracted_issue_date_encrypted")
+  extractedExpiryDateEncrypted       String?   @map("extracted_expiry_date_encrypted")
+  extractedIssuingAuthorityEncrypted String?   @map("extracted_issuing_authority_encrypted")
+  extractedBloodGroupEncrypted       String?   @map("extracted_blood_group_encrypted")
+  extractedAuthorizationEncrypted   String?   @map("extracted_authorization_encrypted")
+  extractedPermanentAddrEncrypted    String?   @map("extracted_permanent_addr_encrypted")
+  extractedFieldsEdited              Json?     @map("extracted_fields_edited")
+  ocrRawTextEncrypted                String?   @map("ocr_raw_text_encrypted") @db.Text
+  ocrConfidence                      Decimal?  @map("ocr_confidence") @db.Decimal(5, 2)
+  isUnreadable                       Boolean   @default(false) @map("is_unreadable")
+  needsReview                        Boolean   @default(false) @map("needs_review")
+  ocrLowConfidenceFields             Json?     @map("ocr_low_confidence_fields")
+  ocrFieldSources                    Json?     @map("ocr_field_sources")
 
   user              User               @relation(fields: [userId], references: [id], onDelete: Restrict)
   connectionRequest ConnectionRequest? @relation(fields: [connectionRequestId], references: [id])

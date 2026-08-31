@@ -23,7 +23,7 @@ export const Logo: React.FC<LogoProps> = ({ className = '', size = 'md' }) => {
           {size === 'sm' ? 'Delhi Portal' : 'Rajdhani / Yamuna'}
         </span>
         <span className={`${sub} text-slate-500 font-normal`}>
-          Official Discom Portal
+          Unofficial Discom Portal
         </span>
       </div>
     </div>

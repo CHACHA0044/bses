@@ -29,7 +29,7 @@
 
 @layer base {
   html {
-    scroll-behavior: smooth;
+    scroll-behavior: auto;
     -webkit-tap-highlight-color: transparent;
     overflow-x: hidden;
   }
@@ -220,6 +220,14 @@
 /* Pure opacity — no translateY so there is zero content shift */
 .page-enter {
   animation: fade-in 0.18s ease-out both;
+}
+
+/* ── Scale override ────────────────────────────────────────────── */
+/* Elements that should NOT inherit the global button hover/active scale. */
+.no-scale,
+.no-scale:hover,
+.no-scale:active {
+  transform: none !important;
 }
 
 /* ── Utility ───────────────────────────────────────────────────── */

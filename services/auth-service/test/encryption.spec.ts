@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { encryptionService } from '../src/services/encryption.service';
+import { encryptionService } from '@bses/shared';
 
 describe('EncryptionService (AES-256 & HMAC-SHA256)', () => {
   it('should encrypt and decrypt plaintext accurately', () => {

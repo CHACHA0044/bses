@@ -23,6 +23,10 @@ router.get('/connections/:id/timeline', authenticate, connectionController.getCo
 // Admin Management & Dashboard Routes
 router.get('/admin/dashboard', authenticate, requireAdmin, adminController.getDashboard);
 router.get('/admin/users', authenticate, requireAdmin, adminController.listUsers);
+router.get('/admin/users/:id', authenticate, requireAdmin, adminController.getUserDetail);
+router.put('/admin/users/:id', authenticate, requireAdmin, adminController.updateUser);
+router.post('/admin/users/:id/status', authenticate, requireAdmin, adminController.changeUserStatus);
+router.get('/admin/users/:id/export', authenticate, requireAdmin, adminController.exportUserData);
 router.get('/admin/connection-requests', authenticate, requireAdmin, adminController.listConnectionRequests);
 
 // ── Workflow Engine Routes (admin) ──

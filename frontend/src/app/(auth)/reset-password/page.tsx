@@ -8,6 +8,9 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { Lock, CheckCircle2, AlertCircle } from 'lucide-react';
 import { apiClient } from '@/lib/apiClient';
+import { AlertSlot } from '@/components/ui/AlertSlot';
+import { useAuthRedirect } from '@/hooks/useAuthRedirect';
+import { AuthPending } from '@/components/common/AuthPending';
 
 const resetSchema = z.object({
   password: z
@@ -30,6 +33,8 @@ function ResetPasswordContent() {
   const router = useRouter();
   const token = searchParams.get('token') || '';
 
+  const { pending } = useAuthRedirect();
+
   const [submitted, setSubmitted] = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);
 
@@ -48,13 +53,17 @@ function ResetPasswordContent() {
         token,
         password: data.password,
         confirmPassword: data.confirmPassword,
-      });
+      }, { timeout: 8000 });
       setSubmitted(true);
     } catch (err: any) {
       const msg = err.response?.data?.error?.message || 'Invalid or expired password reset token.';
       setServerError(msg);
     }
   };
+
+  if (pending && !submitted) {
+    return <AuthPending label="Checking session…" />;
+  }
 
   return (
     <div className="w-full max-w-md bg-slate-800/80 backdrop-blur-md border border-slate-700/60 rounded-2xl shadow-2xl p-8 space-y-6">
@@ -66,12 +75,15 @@ function ResetPasswordContent() {
         <p className="text-xs text-slate-400">Please enter and confirm your new password</p>
       </div>
 
-      {serverError && (
-        <div className="bg-red-500/10 border border-red-500/30 text-red-400 p-4 rounded-xl text-sm flex items-start gap-3">
-          <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
-          <span>{serverError}</span>
-        </div>
-      )}
+      {/* space-y-6 = 24px gap; AlertSlot matches it so the card never snaps. */}
+      <AlertSlot show={!!serverError} gap={24}>
+        {serverError && (
+          <div className="bg-red-500/10 border border-red-500/30 text-red-400 p-4 rounded-xl text-sm flex items-start gap-3">
+            <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
+            <span>{serverError}</span>
+          </div>
+        )}
+      </AlertSlot>
 
       {submitted ? (
         <div className="bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 p-5 rounded-xl text-sm text-center space-y-3">

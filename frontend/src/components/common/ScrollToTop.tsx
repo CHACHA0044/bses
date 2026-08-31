@@ -14,7 +14,13 @@ export const ScrollToTop: React.FC = () => {
   const pathname = usePathname();
 
   useEffect(() => {
-    window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+    if (typeof window !== 'undefined' && 'scrollRestoration' in window.history) {
+      window.history.scrollRestoration = 'manual';
+    }
+  }, []);
+
+  useEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: 'instant' as any });
     document.querySelectorAll('main').forEach((el) => {
       el.scrollTop = 0;
     });

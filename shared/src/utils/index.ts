@@ -42,3 +42,6 @@ export const isNonEmptyString = (val: unknown): val is string =>
 
 export const toTitleCase = (str: string): string =>
   str.toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
+
+export * from './document.util';
+export * from './encryption.util';

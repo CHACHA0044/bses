@@ -85,22 +85,18 @@ export interface PrefetchTarget {
  * no unbounded lists.
  */
 export const CONSUMER_PREFETCH_TARGETS: PrefetchTarget[] = [
-  // Starting a new connection is the #1 action from the consumer dashboard.
   { href: '/connections/apply', weight: 100 },
-  // My Profile — small identity payload.
   { href: '/profile', weight: 90, dataUrls: ['/users/profile'] },
-  // Track Applications — the recent-applications list (bounded).
+  { href: '/profile/edit', weight: 85, dataUrls: ['/users/profile'] },
   { href: '/connections', weight: 80, dataUrls: ['/connections'] },
-  // Static page — chunk only, no data.
   { href: '/settings', weight: 50 },
-  // Static page — chunk only, no data.
   { href: '/help-center', weight: 40 },
 ];
 
 export const ADMIN_PREFETCH_TARGETS: PrefetchTarget[] = [
-  // Reviewing the user directory is the primary admin workflow.
   { href: '/admin/users', weight: 100, dataUrls: ['/admin/users?search='] },
   { href: '/admin/connections', weight: 90, dataUrls: ['/admin/connection-requests'] },
+  { href: '/admin/dashboard', weight: 85, dataUrls: ['/admin/dashboard'] },
   { href: '/settings', weight: 50 },
   { href: '/help-center', weight: 40 },
 ];
@@ -110,6 +106,27 @@ export function getPrefetchTargets(role?: string): PrefetchTarget[] {
   return role === 'ADMIN' || role === 'SUPER_ADMIN'
     ? ADMIN_PREFETCH_TARGETS
     : CONSUMER_PREFETCH_TARGETS;
+}
+
+/**
+ * warmPostLogin — kick off the landing payloads the moment authentication
+ * succeeds, BEFORE navigation starts. The destination page then reads them
+ * from the shared cache on mount (or piggybacks the in-flight request) instead
+ * of issuing its own round-trip, so the dashboard renders with data together
+ * with the auth-derived navbar instead of popping in later.
+ */
+export function warmPostLogin(role?: string): void {
+  if (!role) return;
+  if (!shouldWarmData()) return;
+
+  const isAdmin = role === 'ADMIN' || role === 'SUPER_ADMIN';
+  const urls = isAdmin
+    ? ['/admin/dashboard', '/admin/connection-requests', '/admin/users?search=']
+    : ['/users/dashboard', '/connections', '/users/profile'];
+
+  for (const url of urls) {
+    prefetchApiResource(url);
+  }
 }
 
 /* ── Idle scheduling helper ─────────────────────────────────────── */

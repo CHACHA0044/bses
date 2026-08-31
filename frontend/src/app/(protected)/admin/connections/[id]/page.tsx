@@ -1,9 +1,10 @@
 'use client';
 
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useApiResource } from '@/hooks/useApiResource';
+import { apiClient } from '@/lib/apiClient';
 import { Modal } from '@/components/ui/Modal';
 import { Button, type ButtonVariant } from '@/components/ui/Button';
 import { StatusChip } from '@/components/ui/Badge';
@@ -11,6 +12,7 @@ import { WorkflowModal } from '@/components/workflow/WorkflowModal';
 import { ApplicationTimeline } from '@/components/workflow/ApplicationTimeline';
 import { AssignmentHistory } from '@/components/workflow/AssignmentHistory';
 import { VerificationHistory } from '@/components/workflow/VerificationHistory';
+import { DocumentCard } from '@/components/workflow/DocumentCard';
 import {
   assignApplication,
   approveApplication,
@@ -28,7 +30,6 @@ import {
   Building2,
   CalendarPlus,
   Eye,
-  FileText,
   Gauge,
   MapPin,
   MessageSquarePlus,
@@ -148,6 +149,9 @@ export default function AdminConnectionDetailPage() {
   const [verdicts, setVerdicts] = useState<Record<string, { action: 'APPROVED' | 'REJECTED'; comment: string }>>({});
   const [remark, setRemark] = useState('');
   const [previewDoc, setPreviewDoc] = useState<DocumentRecord | null>(null);
+  const [previewBlobUrl, setPreviewBlobUrl] = useState<string | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
@@ -197,9 +201,95 @@ export default function AdminConnectionDetailPage() {
   const closeModal = (): void => {
     if (!saving) {
       setActiveModal(null);
+      if (previewBlobUrl) {
+        URL.revokeObjectURL(previewBlobUrl);
+        setPreviewBlobUrl(null);
+      }
       setPreviewDoc(null);
+      setPreviewError(null);
     }
   };
+
+  // Fetch document blob via authenticated apiClient (handles 401 → refresh → retry).
+  // This replaces the raw iframe src which could not handle token refresh.
+  // The response is created as a Blob so the document can be shown inline inside
+  // the modal without requiring the admin to download it first.
+  useEffect(() => {
+    if (!previewDoc) {
+      // Clean up previous blob URL when modal closes
+      if (previewBlobUrl) {
+        URL.revokeObjectURL(previewBlobUrl);
+        setPreviewBlobUrl(null);
+      }
+      setPreviewError(null);
+      return;
+    }
+
+    let cancelled = false;
+    const fetchDocument = async () => {
+      setPreviewLoading(true);
+      setPreviewError(null);
+      try {
+        const res = await apiClient.get(`/documents/${previewDoc.id}`, {
+          responseType: 'blob',
+          timeout: 30_000,
+        });
+
+        // Detect a non-2xx error that was returned as a blob (e.g. 401/404 JSON 500
+        // error body) — axios doesn't throw for non-2xx, so we must inspect status
+        // ourselves and surface a meaningful message instead of a blank/errored view.
+        if (res.status < 200 || res.status >= 300) {
+          let detail = `Request failed (${res.status})`;
+          try {
+            const text = await res.data?.text?.();
+            if (text) {
+              const parsed = JSON.parse(text);
+              detail = parsed?.error?.message || parsed?.message || detail;
+            }
+          } catch {
+            // Not a JSON error body — fall through to the generic message.
+          }
+          throw new Error(detail);
+        }
+
+        // Prefer the known upload mimeType; fall back to the response Content-Type
+        // header so images/PDFs render correctly even if the header is missing.
+        const headerType = Array.isArray(res.headers['content-type'])
+          ? res.headers['content-type'][0]
+          : typeof res.headers['content-type'] === 'string'
+            ? res.headers['content-type']
+            : '';
+        const mimeType = previewDoc.mimeType || headerType || 'application/octet-stream';
+
+        const blob = new Blob([res.data], { type: mimeType });
+        if (cancelled) return;
+        const url = URL.createObjectURL(blob);
+        setPreviewBlobUrl(url);
+      } catch (err) {
+        if (cancelled) return;
+        let message = err instanceof Error ? err.message : 'Failed to load document';
+        // axios surfaces a browser-blocked / unreachable cross-origin response as
+        // "Network Error" with no HTTP status — give the admin an actionable hint.
+        if (message === 'Network Error') {
+          message =
+            'The document could not be reached from the browser. This is usually a temporary network/gateway issue — please retry.';
+        }
+        setPreviewError(message);
+      } finally {
+        if (!cancelled) setPreviewLoading(false);
+      }
+    };
+
+    fetchDocument();
+    return () => { cancelled = true; };
+  }, [previewDoc?.id]);
+
+  // Clean up blob URL on unmount
+  useEffect(() => {
+    return () => {
+      if (previewBlobUrl) URL.revokeObjectURL(previewBlobUrl);
+    };
+  }, []);
 
   const run = async (fn: () => Promise<unknown>): Promise<void> => {
     setSaving(true);
@@ -417,31 +507,16 @@ export default function AdminConnectionDetailPage() {
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {documents.map((doc) => (
-                  <div key={doc.id} className="flex items-center gap-3 bg-slate-50 border border-slate-200 rounded-xl p-3">
-                    <div className="h-10 w-10 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0">
-                      <FileText className="w-5 h-5" />
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <p className="text-xs font-bold text-slate-800 truncate" title={doc.documentName}>
-                        {doc.documentName}
-                      </p>
-                      <p className="text-[11px] text-slate-500">
-                        {doc.documentType.replaceAll('_', ' ')} · {formatFileSize(doc.fileSize)} ·{' '}
-                        {formatDate(doc.uploadDate)}
-                      </p>
-                      <span className="mt-1 inline-block">
-                        <StatusChip status={doc.status} showDot={false} />
-                      </span>
-                    </div>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      leftIcon={<Eye className="w-4 h-4" />}
-                      onClick={() => setPreviewDoc(doc)}
-                    >
-                      Preview
-                    </Button>
-                  </div>
+                  <DocumentCard
+                    key={doc.id}
+                    doc={doc}
+                    variant="admin"
+                    actions={
+                      <Button variant="ghost" size="sm" leftIcon={<Eye className="w-4 h-4" />} onClick={() => setPreviewDoc(doc)}>
+                        Preview
+                      </Button>
+                    }
+                  />
                 ))}
               </div>
             )}
@@ -792,20 +867,60 @@ export default function AdminConnectionDetailPage() {
       >
         {previewDoc && (
           <div className="space-y-3">
-            <iframe
-              src={`/api/documents/${previewDoc.id}`}
-              title={previewDoc.documentName}
-              className="w-full h-[440px] rounded-xl border border-slate-200 bg-slate-50"
-            />
+            {previewLoading && (
+              <div className="w-full h-[440px] rounded-xl border border-slate-200 bg-slate-50 flex items-center justify-center">
+                <div className="text-center space-y-2">
+                  <div className="h-6 w-6 border-2 border-amber-400 border-t-transparent rounded-full animate-spin mx-auto" />
+                  <p className="text-xs text-slate-500">Loading document...</p>
+                </div>
+              </div>
+            )}
+            {previewError && (
+              <div className="w-full h-[440px] rounded-xl border border-red-200 bg-red-50 flex items-center justify-center">
+                <div className="text-center space-y-2 px-6">
+                  <p className="text-sm font-semibold text-red-700">Failed to load document</p>
+                  <p className="text-xs text-red-500">{previewError}</p>
+                  <button
+                    onClick={() => {
+                      const doc = previewDoc;
+                      setPreviewDoc(null);
+                      setTimeout(() => setPreviewDoc(doc), 100);
+                    }}
+                    className="text-xs font-bold text-red-600 hover:text-red-800 underline mt-1"
+                  >
+                    Retry
+                  </button>
+                </div>
+              </div>
+            )}
+            {previewBlobUrl && !previewLoading && (
+              previewDoc.mimeType.startsWith('image/') ? (
+                <div className="w-full h-[440px] rounded-xl border border-slate-200 bg-slate-900/5 flex items-center justify-center p-2 overflow-hidden">
+                  <img
+                    src={previewBlobUrl}
+                    alt={previewDoc.documentName}
+                    className="max-h-full max-w-full rounded-lg object-contain"
+                  />
+                </div>
+              ) : (
+                <iframe
+                  src={previewBlobUrl}
+                  title={previewDoc.documentName}
+                  className="w-full h-[440px] rounded-xl border border-slate-200 bg-slate-50"
+                />
+              )
+            )}
             <div className="flex justify-end">
-              <a
-                href={`/api/documents/${previewDoc.id}`}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-700 hover:text-amber-600 transition"
-              >
-                <Eye className="w-4 h-4" /> Open in new tab
-              </a>
+              {previewBlobUrl && (
+                <a
+                  href={previewBlobUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-700 hover:text-amber-600 transition"
+                >
+                  <Eye className="w-4 h-4" /> Open in new tab
+                </a>
+              )}
             </div>
           </div>
         )}

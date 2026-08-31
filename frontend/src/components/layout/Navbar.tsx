@@ -2,7 +2,7 @@
 
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { useAuth } from '@/hooks/useAuth';
 import { Logo } from '../common/Logo';
 import { Button } from '../ui/Button';
@@ -50,6 +50,7 @@ function buildMobileNav(pathname: string, dashHref: string) {
 
 export const Navbar: React.FC = () => {
   const pathname = usePathname();
+  const router = useRouter();
   const { user, isAuthenticated, isLoading, logout } = useAuth();
   const dashHref = (user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN') ? '/admin/dashboard' : '/dashboard';
 
@@ -102,9 +103,16 @@ export const Navbar: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pathname]);
 
-  const initials = user?.firstName && user?.lastName
-    ? `${user.firstName[0]}${user.lastName[0]}`.toUpperCase()
-    : '??';
+  const initials = (() => {
+    if (!user) return '';
+    const first = user.firstName?.trim() || '';
+    const last = user.lastName?.trim() || '';
+    if (first && last) return `${first[0]}${last[0]}`.toUpperCase();
+    if (first) return first.slice(0, 2).toUpperCase();
+    if (user.username) return user.username.slice(0, 2).toUpperCase();
+    if (user.email) return user.email.slice(0, 2).toUpperCase();
+    return 'U';
+  })();
 
   const mobileNavItems = isAuthenticated ? buildMobileNav(pathname, dashHref) : [];
 
@@ -196,7 +204,7 @@ export const Navbar: React.FC = () => {
                 </div>
 
                 <button
-                  onClick={() => logout()}
+                  onClick={() => logout(router)}
                   className={iconButton}
                   aria-label="Sign out"
                   title="Sign out"
@@ -206,19 +214,27 @@ export const Navbar: React.FC = () => {
               </div>
             ) : (
               <div className="flex items-center gap-2">
-                <Link href="/login" prefetch={true} className="hidden sm:block">
-                  <Button variant="secondary" size="sm">Consumer Login</Button>
-                </Link>
-                <Link href="/register" prefetch={true}>
-                  <Button variant="cta" size="sm">New Registration</Button>
-                </Link>
+                {pathname !== '/login' && (
+                  <Link href="/login" prefetch={true} className="hidden sm:block">
+                    <Button variant="secondary" size="sm">Consumer Login</Button>
+                  </Link>
+                )}
+                {pathname !== '/register' && (
+                  <Link
+                    href="/register"
+                    prefetch={true}
+                    className={pathname === '/login' ? 'hidden sm:block' : undefined}
+                  >
+                    <Button variant="cta" size="sm">New Registration</Button>
+                  </Link>
+                )}
               </div>
             )}
 
             {/* Hamburger — smooth icon morph */}
             <button
               onClick={toggleMenu}
-              className={`md:hidden rounded-xl p-2.5 text-slate-700 hover:bg-slate-100 transition-all duration-200 cursor-pointer ${interactiveBase}`}
+              className={`md:hidden rounded-lg p-2.5 -mr-2 text-slate-700 transition-colors duration-200 cursor-pointer ${interactiveBase}`}
               aria-label={menuOpen ? 'Close menu' : 'Open menu'}
               aria-expanded={menuOpen}
               aria-controls="mobile-nav"
@@ -311,7 +327,7 @@ export const Navbar: React.FC = () => {
                   <div className="my-2 border-t border-slate-100" />
 
                   <button
-                    onClick={() => { logout(); }}
+                    onClick={() => { logout(router); }}
                     className={`${navItemBase} justify-between w-full rounded-xl px-4 py-3.5 min-h-[48px] text-error hover:bg-red-50 text-base`}
                   >
                     <span className="flex items-center gap-3">
@@ -344,12 +360,16 @@ export const Navbar: React.FC = () => {
                   ))}
                   <div className="my-2 border-t border-slate-100" />
                   <div className="space-y-2 pb-2">
-                    <Link href="/login" prefetch={true} onClick={closeMenu}>
-                      <Button variant="secondary" size="md" fullWidth>Consumer Login</Button>
-                    </Link>
-                    <Link href="/register" prefetch={true} onClick={closeMenu}>
-                      <Button variant="cta" size="md" fullWidth>New Registration</Button>
-                    </Link>
+                    {pathname !== '/login' && (
+                      <Link href="/login" prefetch={true} onClick={closeMenu}>
+                        <Button variant="secondary" size="md" fullWidth>Consumer Login</Button>
+                      </Link>
+                    )}
+                    {pathname !== '/register' && (
+                      <Link href="/register" prefetch={true} onClick={closeMenu}>
+                        <Button variant="cta" size="md" fullWidth>New Registration</Button>
+                      </Link>
+                    )}
                   </div>
                 </>
               )}

@@ -6,6 +6,9 @@ export const applyConnectionSchema = z.object({
   requiredLoad: z.coerce.number().positive('Required load must be a positive number in kW').max(1000, 'Max load exceeded'),
   propertyAddress: z.string().trim().min(10, 'Property address must be at least 10 characters'),
   isDraft: z.boolean().optional().default(false),
+  // Documents uploaded during the wizard (before the application record
+  // existed) get attached to the newly created application.
+  documentIds: z.array(z.string()).optional().default([]),
 });
 
 export const updateConnectionSchema = z.object({

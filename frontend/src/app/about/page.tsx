@@ -39,7 +39,7 @@ export default function AboutPage() {
         <div className="space-y-3 text-center sm:text-left">
           <div className="inline-flex items-center gap-2 rounded-full bg-primary/10 px-3.5 py-1 text-xs font-bold text-primary border border-primary/20">
             <Zap className="h-4 w-4 text-primary" />
-            <span>Official Discom Profile</span>
+            <span>Unofficial Discom Profile</span>
           </div>
           <h1 className="text-3xl sm:text-4xl font-extrabold text-slate-900 tracking-tight font-heading">
             About BSES Rajdhani Power Limited (BRPL)

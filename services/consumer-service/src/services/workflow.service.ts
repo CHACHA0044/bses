@@ -1,13 +1,14 @@
 import { ConnectionStatus, AuditAction, WorkflowActionType, VerificationResult, DocumentStatus, AssignmentStatus, Prisma, User } from '@prisma/client';
-import { ConflictError, NotFoundError, ValidationError } from '@bses/shared';
+import { ConflictError, NotFoundError, ValidationError, toDocumentViews } from '@bses/shared';
 import { connectionRepository } from '../repositories/connection.repository';
 import { workflowRepository } from '../repositories/workflow.repository';
 import { documentRepository } from '../repositories/document.repository';
 import { userRepository } from '../repositories/user.repository';
 import { auditRepository } from '../repositories/audit.repository';
 import { notificationClient } from './notification.client';
-import { encryptionService } from './encryption.service';
+import { encryptionService } from '@bses/shared';
 import { ADMIN_ROLES, connectionWorkflow, WORKFLOW_ACTION_LABELS, IN_PROGRESS_STATUSES, SUCCESS_STATUSES } from '../config/connectionWorkflow';
+import { assessDocumentCompleteness } from '../config/requiredDocuments';
 
 export interface Actor {
   id: string;
@@ -51,9 +52,9 @@ export class WorkflowService {
     return connection;
   }
 
-  private async notifyConsumer(connection: any, notify: (mobile: string) => Promise<void>): Promise<void> {
+  private async notifyConsumer(connection: any, notify: (mobile: string, userId?: string) => Promise<void>): Promise<void> {
     const mobile = connection.user?.mobileEncrypted ? encryptionService.decrypt(connection.user.mobileEncrypted) : null;
-    if (mobile) await notify(mobile);
+    if (mobile) await notify(mobile, connection.user?.id);
   }
 
   /**
@@ -70,6 +71,8 @@ export class WorkflowService {
       from !== input.to
         ? await connectionRepository.update(input.connection.id, { status: input.to })
         : input.connection;
+
+    const connectionWithUser = { ...updated, user: input.connection.user };
 
     const action = await workflowRepository.recordWorkflowAction({
       connectionRequestId: input.connection.id,
@@ -106,7 +109,7 @@ export class WorkflowService {
       },
     });
 
-    return { connection: updated, action };
+    return { connection: connectionWithUser, action };
   }
 
   // ── Consumer actions ─────────────────────────────────────────────────────────
@@ -114,6 +117,39 @@ export class WorkflowService {
   public async submitApplication(connectionId: string, actor: Actor, ipAddress: string, comment?: string, requestId?: string): Promise<any> {
     const connection = await this.loadConnection(connectionId);
     this.assertOwner(connection, actor.id);
+
+    // Completeness gate: every required document group must be satisfied by an
+    // acceptable upload (present, readable, not flagged for manual review).
+    // When the gate fails the application is auto-held in DOCUMENTS_PENDING
+    // instead of advancing — the consumer is told exactly which group blocked
+    // it, both on screen and via SMS/WhatsApp ("Document verification pending").
+    const assessment = assessDocumentCompleteness(connection.documents ?? [], connection.connectionType);
+
+    if (!assessment.complete) {
+      const notes =
+        assessment.issues.length > 0
+          ? `Submission held — document verification pending: ${assessment.issues.join('; ').slice(0, 500)}`
+          : 'Submission held — document verification pending';
+
+      const { connection: updated } = await this.transition({
+        connection,
+        action: WorkflowActionType.SUBMIT,
+        to: ConnectionStatus.DOCUMENTS_PENDING,
+        actor,
+        ipAddress,
+        auditAction: AuditAction.WORKFLOW_TRANSITION,
+        notes,
+        metadata: { autoHeld: true, documentIssues: assessment.issues },
+        ...(comment !== undefined && { comment }),
+        ...(requestId !== undefined && { requestId }),
+      });
+
+      await this.notifyConsumer(updated, (mobile, userId) =>
+        notificationClient.notifyDocumentVerificationPending(mobile, updated.applicationNumber, userId),
+      );
+
+      return updated;
+    }
 
     const to = connection.status === ConnectionStatus.DRAFT ? ConnectionStatus.SUBMITTED : ConnectionStatus.UNDER_VERIFICATION;
 
@@ -128,8 +164,8 @@ export class WorkflowService {
       ...(requestId !== undefined && { requestId }),
     });
 
-    await this.notifyConsumer(updated, (mobile) =>
-      notificationClient.notifyApplicationSubmitted(mobile, updated.applicationNumber),
+    await this.notifyConsumer(updated, (mobile, userId) =>
+      notificationClient.notifyApplicationSubmitted(mobile, updated.applicationNumber, userId),
     );
 
     return updated;
@@ -187,8 +223,8 @@ export class WorkflowService {
       actionId: action.id,
     });
 
-    await this.notifyConsumer(updated, (mobile) =>
-      notificationClient.notifyApplicationAssigned(mobile, updated.applicationNumber, this.formatOfficerName(assignee)),
+    await this.notifyConsumer(updated, (mobile, userId) =>
+      notificationClient.notifyApplicationAssigned(mobile, updated.applicationNumber, this.formatOfficerName(assignee), userId),
     );
 
     return updated;
@@ -245,8 +281,8 @@ export class WorkflowService {
       });
     }
 
-    await this.notifyConsumer(updated, (mobile) =>
-      notificationClient.notifyDocumentsRequested(mobile, updated.applicationNumber),
+    await this.notifyConsumer(updated, (mobile, userId) =>
+      notificationClient.notifyDocumentsRequested(mobile, updated.applicationNumber, userId),
     );
 
     return updated;
@@ -297,8 +333,8 @@ export class WorkflowService {
       });
     }
 
-    await this.notifyConsumer(updated, (mobile) =>
-      notificationClient.notifyVerificationCompleted(mobile, updated.applicationNumber),
+    await this.notifyConsumer(updated, (mobile, userId) =>
+      notificationClient.notifyVerificationCompleted(mobile, updated.applicationNumber, userId),
     );
 
     return updated;
@@ -318,8 +354,8 @@ export class WorkflowService {
       ...(requestId !== undefined && { requestId }),
     });
 
-    await this.notifyConsumer(updated, (mobile) =>
-      notificationClient.notifyApplicationApproved(mobile, updated.applicationNumber),
+    await this.notifyConsumer(updated, (mobile, userId) =>
+      notificationClient.notifyApplicationApproved(mobile, updated.applicationNumber, userId),
     );
 
     return updated;
@@ -346,8 +382,8 @@ export class WorkflowService {
       ...(requestId !== undefined && { requestId }),
     });
 
-    await this.notifyConsumer(updated, (mobile) =>
-      notificationClient.notifyApplicationRejected(mobile, updated.applicationNumber, opts.reason),
+    await this.notifyConsumer(updated, (mobile, userId) =>
+      notificationClient.notifyApplicationRejected(mobile, updated.applicationNumber, opts.reason, userId),
     );
 
     return updated;
@@ -374,8 +410,8 @@ export class WorkflowService {
       ...(requestId !== undefined && { requestId }),
     });
 
-    await this.notifyConsumer(updated, (mobile) =>
-      notificationClient.notifyConnectionScheduled(mobile, updated.applicationNumber, opts.scheduledDate),
+    await this.notifyConsumer(updated, (mobile, userId) =>
+      notificationClient.notifyConnectionScheduled(mobile, updated.applicationNumber, opts.scheduledDate, userId),
     );
 
     return updated;
@@ -395,8 +431,8 @@ export class WorkflowService {
       ...(requestId !== undefined && { requestId }),
     });
 
-    await this.notifyConsumer(updated, (mobile) =>
-      notificationClient.notifyConnectionCompleted(mobile, updated.applicationNumber),
+    await this.notifyConsumer(updated, (mobile, userId) =>
+      notificationClient.notifyConnectionCompleted(mobile, updated.applicationNumber, userId),
     );
 
     return updated;
@@ -470,9 +506,17 @@ export class WorkflowService {
 
     const { mobileEncrypted, ...user } = connection.user ?? {};
 
+    // Documents are returned as safe views — encrypted OCR columns are stripped
+    // and extracted PII is fully decrypted for officers/admins but masked for
+    // consumers (DPDP).
+    const documents = toDocumentViews(connection.documents, {
+      includeSensitive: actor.role !== 'CONSUMER',
+    });
+
     return {
       ...connection,
       user,
+      documents,
       timeline,
       allowedTransitions,
       stage: this.getStageInfo(connection.status),

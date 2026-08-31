@@ -34,6 +34,30 @@ export type AssignmentStatus = 'ACTIVE' | 'REPLACED' | 'CLOSED';
 
 export type DocumentStatus = 'PENDING' | 'VERIFIED' | 'REJECTED';
 
+export type OcrStatus = 'PROCESSING' | 'EXTRACTED' | 'UNREADABLE' | 'NEEDS_REVIEW';
+
+export interface DocumentOcrData {
+  aadhaar?: string | null;
+  pan?: string | null;
+  name?: string | null;
+  dob?: string | null;
+  fatherName?: string | null;
+  licenseNumber?: string | null;
+  address?: string | null;
+  validity?: string | null;
+  pinCode?: string | null;
+  state?: string | null;
+  district?: string | null;
+  issueDate?: string | null;
+  expiryDate?: string | null;
+  issuingAuthority?: string | null;
+  bloodGroup?: string | null;
+  authorization?: string | null;
+  permanentAddress?: string | null;
+  editedFields?: string[];
+  rawText?: string | null;
+}
+
 export type VerificationResult = 'APPROVED' | 'REJECTED' | 'REQUESTED';
 
 export type StageCategory = 'draft' | 'in_progress' | 'approved' | 'rejected' | 'completed';
@@ -46,6 +70,12 @@ export interface DocumentRecord {
   fileSize: number;
   uploadDate: string;
   status: DocumentStatus;
+  isUnreadable?: boolean;
+  ocrConfidence?: number | null;
+  ocrStatus?: OcrStatus;
+  needsReview?: boolean;
+  ocrLowConfidenceFields?: string[];
+  ocrData?: DocumentOcrData;
 }
 
 export interface TimelineEvent {
@@ -162,7 +192,12 @@ export interface Officer {
 }
 
 export interface AdminAnalytics {
-  consumers?: { totalActive?: number };
+  consumers?: {
+    totalActive?: number;
+    genderDistribution?: Record<string, number>;
+    monthlyRegistrations?: { month: string; count: number }[];
+    dailyRegistrations?: { day: string; count: number }[];
+  };
   connectionRequests?: {
     totalApplications?: number;
     pendingCount?: number;
@@ -171,6 +206,7 @@ export interface AdminAnalytics {
     scheduledCount?: number;
     completedCount?: number;
     rejectedCount?: number;
+    trends?: { category: string; count: number }[];
   };
   officers?: { totalActive?: number };
 }

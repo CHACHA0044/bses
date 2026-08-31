@@ -1,17 +1,25 @@
 import { RefreshToken } from '@prisma/client';
 import { getPrismaClient } from '../db/db.client';
 
+export interface CreateRefreshTokenData {
+  userId?: string | null;
+  adminId?: string | null;
+  tokenHash: string;
+  expiresAt: Date;
+}
+
 export class RefreshTokenRepository {
   private get prisma() {
     return getPrismaClient();
   }
 
-  public async createRefreshToken(userId: string, tokenHash: string, expiresAt: Date): Promise<RefreshToken> {
+  public async createRefreshToken(data: CreateRefreshTokenData): Promise<RefreshToken> {
     return this.prisma.refreshToken.create({
       data: {
-        userId,
-        tokenHash,
-        expiresAt,
+        userId: data.userId ?? null,
+        adminId: data.adminId ?? null,
+        tokenHash: data.tokenHash,
+        expiresAt: data.expiresAt,
       },
     });
   }
@@ -35,6 +43,13 @@ export class RefreshTokenRepository {
   public async revokeAllUserTokens(userId: string): Promise<void> {
     await this.prisma.refreshToken.updateMany({
       where: { userId, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
+  }
+
+  public async revokeAllAdminTokens(adminId: string): Promise<void> {
+    await this.prisma.refreshToken.updateMany({
+      where: { adminId, revokedAt: null },
       data: { revokedAt: new Date() },
     });
   }

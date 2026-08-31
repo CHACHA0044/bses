@@ -1,8 +1,14 @@
+import 'dotenv/config';
 import { PrismaClient, UserRole, Gender, ConsentType } from '@prisma/client';
+import { PrismaPg } from '@prisma/adapter-pg';
 import bcrypt from 'bcrypt';
 import crypto from 'crypto';
 
-const prisma = new PrismaClient();
+const adapter = new PrismaPg({
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false },
+});
+const prisma = new PrismaClient({ adapter });
 
 function getEncKey() {
   const hex = process.env['AES_SECRET_KEY'];

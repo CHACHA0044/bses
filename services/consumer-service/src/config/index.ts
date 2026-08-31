@@ -6,6 +6,7 @@ const consumerEnvSchema = baseEnvSchema.extend({
   DATABASE_URL: z.string().url('DATABASE_URL must be a valid PostgreSQL connection string'),
   AES_SECRET_KEY: z.string().length(64, 'AES_SECRET_KEY must be 64 hex characters'),
   AES_IV: z.string().length(32, 'AES_IV must be 32 hex characters'),
+  JWT_SECRET: z.string().min(32, 'JWT_SECRET must be at least 32 characters'),
   CORS_ORIGINS: z
     .string()
     .default('http://localhost:3001')

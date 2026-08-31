@@ -1,9 +1,10 @@
 'use client';
 
-import React, { useEffect } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { useAuth } from '@/hooks/useAuth';
 import { LoadingSpinner } from './LoadingSpinner';
+import { Logo } from './Logo';
 
 export type AllowedRole = 'CONSUMER' | 'ADMIN' | 'SUPER_ADMIN';
 
@@ -36,7 +37,22 @@ export const AuthGuard: React.FC<AuthGuardProps> = ({
   const router = useRouter();
   const pathname = usePathname();
 
-  const allowed = allowRoles ?? (requireRole ? [requireRole] : undefined);
+  const allowed = useMemo(
+    () => allowRoles ?? (requireRole ? [requireRole] : undefined),
+    [allowRoles, requireRole],
+  );
+
+  // Fail-safe: never let the guard sit on the loading screen forever. If the
+  // session check hasn't settled within 8s (network hang, gateway down, store
+  // regression), bounce to /login with a `next` return path.
+  useEffect(() => {
+    if (!isLoading) return;
+    const timer = setTimeout(() => {
+      const next = pathname ? `?next=${encodeURIComponent(pathname)}` : '';
+      router.replace(`/login${next}`);
+    }, 8000);
+    return () => clearTimeout(timer);
+  }, [isLoading, pathname, router]);
 
   useEffect(() => {
     if (isLoading) return;
@@ -58,7 +74,8 @@ export const AuthGuard: React.FC<AuthGuardProps> = ({
 
   if (isLoading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-slate-50">
+      <div className="flex min-h-screen flex-col items-center justify-center gap-8 bg-slate-50 px-4">
+        <Logo size="lg" />
         <LoadingSpinner label="Authenticating session..." />
       </div>
     );

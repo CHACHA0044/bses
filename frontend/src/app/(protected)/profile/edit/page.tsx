@@ -6,6 +6,7 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { apiClient } from '@/lib/apiClient';
+import { useApiResource, invalidateApiCache } from '@/hooks/useApiResource';
 import { ArrowLeft, Save, AlertCircle } from 'lucide-react';
 import Link from 'next/link';
 
@@ -21,6 +22,8 @@ export default function EditProfilePage() {
   const router = useRouter();
   const [serverError, setServerError] = useState<string | null>(null);
 
+  const { data: profilePayload } = useApiResource<{ profile?: any }>('/users/profile');
+
   const {
     register,
     handleSubmit,
@@ -31,26 +34,19 @@ export default function EditProfilePage() {
   });
 
   useEffect(() => {
-    async function loadCurrentProfile() {
-      try {
-        const res = await apiClient.get('/users/profile');
-        if (res.data.success) {
-          const p = res.data.data.profile;
-          setValue('email', p.email || '');
-          setValue('mobile', p.mobile || '');
-          setValue('aadhaar', p.aadhaar || '');
-        }
-      } catch (err) {
-        console.error('Failed to load profile for editing', err);
-      }
+    if (profilePayload?.profile) {
+      const p = profilePayload.profile;
+      setValue('email', p.email || '');
+      setValue('mobile', p.mobile || '');
+      setValue('aadhaar', p.aadhaar || '');
     }
-    loadCurrentProfile();
-  }, [setValue]);
+  }, [profilePayload, setValue]);
 
-  const onSubmit = async (data: EditProfileFormData) => {
+  const onSubmit = async (formData: EditProfileFormData) => {
     setServerError(null);
     try {
-      await apiClient.put('/users/profile', data);
+      await apiClient.put('/users/profile', formData);
+      invalidateApiCache('/users/profile');
       router.push('/profile');
     } catch (err: any) {
       setServerError(err.response?.data?.error?.message || 'Failed to update profile.');

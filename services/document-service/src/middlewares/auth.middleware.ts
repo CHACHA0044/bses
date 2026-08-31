@@ -1,6 +1,7 @@
 import type { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { AuthenticationError, JWT, JwtAccessPayload } from '@bses/shared';
+import { config } from '../config';
 
 const extractToken = (req: Request): string | null => {
   const authHeader = req.headers.authorization;
@@ -20,7 +21,7 @@ export const authenticate = (req: Request, _res: Response, next: NextFunction): 
       throw new AuthenticationError('Authentication required');
     }
 
-    const payload = jwt.verify(token, process.env['JWT_SECRET'] || 'secret') as JwtAccessPayload;
+    const payload = jwt.verify(token, config.JWT_SECRET) as JwtAccessPayload;
     req.user = payload;
     next();
   } catch (err) {

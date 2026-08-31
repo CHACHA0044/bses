@@ -7,6 +7,9 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { KeyRound, Mail, ArrowLeft, CheckCircle2, AlertCircle } from 'lucide-react';
 import { apiClient } from '@/lib/apiClient';
+import { AlertSlot } from '@/components/ui/AlertSlot';
+import { useAuthRedirect } from '@/hooks/useAuthRedirect';
+import { AuthPending } from '@/components/common/AuthPending';
 
 const forgotSchema = z.object({
   email: z.string().email('Invalid email address format'),
@@ -15,6 +18,7 @@ const forgotSchema = z.object({
 type ForgotFormData = z.infer<typeof forgotSchema>;
 
 export default function ForgotPasswordPage() {
+  const { pending } = useAuthRedirect();
   const [submitted, setSubmitted] = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);
 
@@ -29,12 +33,20 @@ export default function ForgotPasswordPage() {
   const onSubmit = async (data: ForgotFormData) => {
     setServerError(null);
     try {
-      await apiClient.post('/auth/forgot-password', data);
+      await apiClient.post('/auth/forgot-password', data, { timeout: 8000 });
       setSubmitted(true);
     } catch (err: any) {
       setServerError('An error occurred while requesting password reset. Please try again.');
     }
   };
+
+  if (pending && !submitted) {
+    return (
+      <div className="min-h-screen bg-slate-900 text-slate-100 flex items-center justify-center p-4">
+        <AuthPending label="Checking session…" />
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-900 text-slate-100 flex items-center justify-center p-4">
@@ -47,12 +59,15 @@ export default function ForgotPasswordPage() {
           <p className="text-xs text-slate-400">Enter your registered email address to receive password reset instructions</p>
         </div>
 
-        {serverError && (
-          <div className="bg-red-500/10 border border-red-500/30 text-red-400 p-4 rounded-xl text-sm flex items-start gap-3">
-            <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
-            <span>{serverError}</span>
-          </div>
-        )}
+        {/* space-y-6 = 24px gap; AlertSlot matches it so the card never snaps. */}
+        <AlertSlot show={!!serverError} gap={24}>
+          {serverError && (
+            <div className="bg-red-500/10 border border-red-500/30 text-red-400 p-4 rounded-xl text-sm flex items-start gap-3">
+              <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
+              <span>{serverError}</span>
+            </div>
+          )}
+        </AlertSlot>
 
         {submitted ? (
           <div className="bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 p-5 rounded-xl text-sm text-center space-y-3">

@@ -1,4 +1,5 @@
 import express from 'express';
+import type { IncomingMessage } from 'node:http';
 import helmet from 'helmet';
 import cors from 'cors';
 import { rateLimit } from 'express-rate-limit';
@@ -11,9 +12,11 @@ import {
   notFound,
   globalErrorHandler,
   createHealthHandlers,
+  sendSuccess,
 } from '@bses/shared';
 import { config } from './config';
 import { registerRoutes } from './routes';
+import { getSupervisorStatus } from './supervisorStatus';
 
 export const createApp = (): express.Application => {
   const app = express();
@@ -31,8 +34,19 @@ export const createApp = (): express.Application => {
     }),
   );
 
-  app.use(express.json({ limit: '10mb' }));
-  app.use(express.urlencoded({ extended: true }));
+  // Body parsers are scoped to their exact content type so multipart/form-data
+  // uploads are NEVER buffered or consumed before they reach the proxy — the
+  // raw request stream must pass straight through to the upstream service.
+  // Express's default type matching already skips multipart, but making it
+  // explicit protects the upload route from any parser change or re-serialization.
+  const isJsonRequest = (req: IncomingMessage): boolean =>
+    /^application\/(.+\+)?json\b/i.test(req.headers['content-type'] ?? '');
+
+  const isUrlEncodedRequest = (req: IncomingMessage): boolean =>
+    /^application\/x-www-form-urlencoded\b/i.test(req.headers['content-type'] ?? '');
+
+  app.use(express.json({ limit: '10mb', type: isJsonRequest }));
+  app.use(express.urlencoded({ extended: true, type: isUrlEncodedRequest }));
 
   app.use(requestIdMiddleware);
   app.use(correlationId);
@@ -90,6 +104,55 @@ export const createApp = (): express.Application => {
   app.get('/health', healthHandler);
   app.get('/ready', readinessHandler);
   app.get('/version', versionHandler);
+
+  // Aggregated status: gateway + supervisor + every internal service. The
+  // supervisor pushes per-service state via IPC when running under the BSES
+  // supervisor; live loopback probes are always performed as ground truth, so
+  // the endpoint remains useful even when the gateway runs standalone.
+  app.get('/health/services', async (_req, res) => {
+    const upstreams = [
+      { name: 'auth', url: `${config.AUTH_SERVICE_URL}/health` },
+      { name: 'consumer', url: `${config.CONSUMER_SERVICE_URL}/health` },
+      { name: 'document', url: `${config.DOCUMENT_SERVICE_URL}/health` },
+      { name: 'notification', url: `${config.NOTIFICATION_SERVICE_URL}/health` },
+    ];
+
+    const results = await Promise.allSettled(
+      upstreams.map(async (u) => {
+        const probe = await axios.get(u.url, { timeout: 3000 });
+        return { name: u.name, status: probe.status === 200 ? 'healthy' : 'unhealthy' };
+      }),
+    );
+
+    const live: Record<string, string> = {};
+    results.forEach((r, i) => {
+      const name = upstreams[i]?.name ?? `service-${i}`;
+      if (r.status === 'fulfilled') live[name] = r.value.status;
+      else live[name] = 'down';
+    });
+
+    const supervisor = getSupervisorStatus();
+
+    const services: Record<string, string> = {};
+    for (const [name, liveStatus] of Object.entries(live)) {
+      const reported = supervisor?.services.find((s) => s.name === name);
+      services[name] = reported && liveStatus === 'down'
+        ? reported.state === 'running' ? 'unhealthy' : reported.state
+        : liveStatus;
+    }
+
+    const allHealthy = Object.values(services).every((s) => s === 'healthy');
+
+    sendSuccess(res, {
+      status: allHealthy ? 'ok' : 'degraded',
+      service: 'gateway',
+      timestamp: new Date().toISOString(),
+      supervisor: supervisor
+        ? { pid: supervisor.supervisor.pid, uptimeSeconds: supervisor.supervisor.uptimeSeconds, state: supervisor.supervisor.state }
+        : null,
+      services,
+    });
+  });
 
   registerRoutes(app);
 
