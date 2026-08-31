@@ -22,10 +22,16 @@ export const connectMongoDB = async (
   let attempts = 0;
   let delay = initialDelayMs;
 
+  // Redact the password from a MongoSRV URI for safe logging.
+  const redactUri = (raw: string): string =>
+    raw.replace(/(mongodb(?:\+srv)?:\/\/[^:]+:)([^@]+)(@)/, '$1***$3');
+
   while (attempts < maxRetries) {
     try {
       attempts++;
-      logger.info(`Connecting to MongoDB Atlas (Attempt ${attempts}/${maxRetries})...`);
+      logger.info(
+        `Connecting to MongoDB Atlas (Attempt ${attempts}/${maxRetries}) -> ${redactUri(uri)}`,
+      );
 
       if (!mongoClientInstance) {
         mongoClientInstance = new MongoClient(uri, {
@@ -43,7 +49,9 @@ export const connectMongoDB = async (
       logger.info(`Successfully connected to MongoDB. GridFS bucket '${bucketName}' initialized.`);
       return { client: mongoClientInstance, db: dbInstance, bucket: gridfsBucketInstance };
     } catch (err: unknown) {
-      logger.warn(`MongoDB connection attempt ${attempts}/${maxRetries} failed: ${err instanceof Error ? err.message : String(err)}`);
+      logger.warn(
+        `MongoDB connection attempt ${attempts}/${maxRetries} failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
       if (attempts >= maxRetries) {
         logger.error('Max MongoDB connection retries reached. Database unavailable.');
         throw err;
@@ -74,13 +82,19 @@ export const disconnectMongoDB = async (): Promise<void> => {
   }
 };
 
-export const checkMongoHealth = async (): Promise<{ ready: boolean; details?: Record<string, unknown> }> => {
+export const checkMongoHealth = async (): Promise<{
+  ready: boolean;
+  details?: Record<string, unknown>;
+}> => {
   try {
     if (!dbInstance) {
       return { ready: false, details: { database: 'MongoDB GridFS', status: 'not_connected' } };
     }
     await dbInstance.admin().ping();
-    return { ready: true, details: { database: 'MongoDB GridFS', status: 'connected', bucket: 'documents' } };
+    return {
+      ready: true,
+      details: { database: 'MongoDB GridFS', status: 'connected', bucket: 'documents' },
+    };
   } catch (err: unknown) {
     return {
       ready: false,
