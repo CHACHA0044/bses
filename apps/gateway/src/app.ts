@@ -13,6 +13,7 @@ import {
   globalErrorHandler,
   createHealthHandlers,
   sendSuccess,
+  isAllowedOrigin,
 } from '@bses/shared';
 import { config } from './config';
 import { registerRoutes } from './routes';
@@ -25,9 +26,18 @@ export const createApp = (): express.Application => {
 
   app.use(helmet());
   app.use(compressionMiddleware);
+  // CORS policy: localhost, any *.vercel.app, plus explicit CORS_ORIGINS env list.
+  // The shared isAllowedOrigin helper is also used by the proxy response handler
+  // (routes/index.ts) so the policy is identical on direct and proxied responses.
   app.use(
     cors({
-      origin: config.CORS_ORIGINS,
+      origin: (origin, callback) => {
+        if (isAllowedOrigin(origin ?? undefined, config.CORS_ORIGINS)) {
+          callback(null, true);
+        } else {
+          callback(new Error(`Origin ${origin} not allowed by CORS`));
+        }
+      },
       credentials: true,
       methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
       allowedHeaders: ['Content-Type', 'Authorization', 'x-correlation-id', 'x-request-id'],
@@ -105,6 +115,34 @@ export const createApp = (): express.Application => {
   app.get('/ready', readinessHandler);
   app.get('/version', versionHandler);
 
+  // Self-ping keep-alive: a cheap /ping endpoint that does a small CPU + memory
+  // workout and returns. Render (and similar PaaS) spin down free/cheap
+  // instances after a few minutes of no traffic. An external cron (e.g. an
+  // UptimeRobot monitor or GitHub Action) hitting /ping every 3 minutes keeps
+  // the service warm and avoids cold-start delays on real user traffic.
+  // The light "work" is a checksum over a process-snapshot string so a passive
+  // observability tool can confirm the request actually exercised the event loop
+  // (and didn't just hit a static cache).
+  app.get('/ping', (_req, res) => {
+    const started = Date.now();
+    const snapshot = JSON.stringify({
+      pid: process.pid,
+      uptime: process.uptime(),
+      memory: process.memoryUsage().rss,
+      timestamp: started,
+    });
+    let hash = 0;
+    for (let i = 0; i < snapshot.length; i++) {
+      hash = (hash * 31 + snapshot.charCodeAt(i)) | 0;
+    }
+    sendSuccess(res, {
+      pong: true,
+      checksum: hash,
+      elapsedMs: Date.now() - started,
+      timestamp: new Date(started).toISOString(),
+    });
+  });
+
   // Aggregated status: gateway + supervisor + every internal service. The
   // supervisor pushes per-service state via IPC when running under the BSES
   // supervisor; live loopback probes are always performed as ground truth, so
@@ -136,9 +174,12 @@ export const createApp = (): express.Application => {
     const services: Record<string, string> = {};
     for (const [name, liveStatus] of Object.entries(live)) {
       const reported = supervisor?.services.find((s) => s.name === name);
-      services[name] = reported && liveStatus === 'down'
-        ? reported.state === 'running' ? 'unhealthy' : reported.state
-        : liveStatus;
+      services[name] =
+        reported && liveStatus === 'down'
+          ? reported.state === 'running'
+            ? 'unhealthy'
+            : reported.state
+          : liveStatus;
     }
 
     const allHealthy = Object.values(services).every((s) => s === 'healthy');
@@ -148,7 +189,11 @@ export const createApp = (): express.Application => {
       service: 'gateway',
       timestamp: new Date().toISOString(),
       supervisor: supervisor
-        ? { pid: supervisor.supervisor.pid, uptimeSeconds: supervisor.supervisor.uptimeSeconds, state: supervisor.supervisor.state }
+        ? {
+            pid: supervisor.supervisor.pid,
+            uptimeSeconds: supervisor.supervisor.uptimeSeconds,
+            state: supervisor.supervisor.state,
+          }
         : null,
       services,
     });

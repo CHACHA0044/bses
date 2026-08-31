@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+export * from './cors';
+
 /**
  * Creates a type-safe configuration object from a Zod schema applied to
  * process.env. Throws at startup if any required variable is missing or

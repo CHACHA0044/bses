@@ -2,7 +2,7 @@ import type { Application } from 'express';
 import http from 'http';
 import https from 'https';
 import { createProxyMiddleware, fixRequestBody } from 'http-proxy-middleware';
-import { createLogger } from '@bses/shared';
+import { createLogger, isAllowedOrigin } from '@bses/shared';
 import { config } from '../config';
 
 const logger = createLogger({ service: 'gateway-proxy' });
@@ -89,7 +89,7 @@ export const registerRoutes = (app: Application): void => {
             // previews/PDFs/images) that bypass middleware — which is what fixes the
             // browser blocking cross-origin blob responses ("Network Error" in axios).
             const origin = req.headers.origin;
-            if (origin && config.CORS_ORIGINS.includes(origin)) {
+            if (origin && isAllowedOrigin(origin, config.CORS_ORIGINS)) {
               proxyRes.headers['access-control-allow-origin'] = origin;
               proxyRes.headers['access-control-allow-credentials'] = 'true';
               const exposed = [
