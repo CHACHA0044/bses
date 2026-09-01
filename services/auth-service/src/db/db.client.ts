@@ -10,7 +10,7 @@ const logger = createLogger({ service: 'prisma-client' });
 /**
  * Resolve a hostname to an IPv4 literal.
  *
- * Two independent strategies, tried in order:
+ * Three independent strategies, tried in order:
  *
  * 1. `dns.resolve4` — Node's internal DNS (uses the `dns` module's
  *    configured server, NOT the OS resolver). Render's free tier has a
@@ -23,8 +23,14 @@ const logger = createLogger({ service: 'prisma-client' });
  *    hostname from Render's network. Get the A record once from your own
  *    machine (`nslookup db.<ref>.supabase.co`) and paste it here.
  *
- * Returns null if neither strategy works — caller falls back to the raw
- * connection string (which will then use the OS resolver and may hit IPv6).
+ * 3. Public DNS resolvers (Google 8.8.8.8, Cloudflare 1.1.1.1) via
+ *    `dns.lookup` with `family: 4`. Some authoritative DNS servers (like
+ *    Supabase's) only publish AAAA records for certain hostnames, but
+ *    public resolvers may have cached A records from a different path.
+ *
+ * Returns null if none of the strategies work — caller falls back to the
+ * raw connection string (which will then use the OS resolver and may hit
+ * IPv6).
  */
 const resolveIPv4 = (hostname: string): string | null => {
   // Strategy 2 — hard-coded override wins.
@@ -50,6 +56,37 @@ const resolveIPv4 = (hostname: string): string | null => {
     }
   } catch {
     // fall through
+  }
+
+  // Strategy 3 — try public DNS resolvers (Google 8.8.8.8, Cloudflare 1.1.1.1)
+  // via dns.lookup with explicit family. We temporarily swap the global
+  // server list, run the lookup, and restore. dns.lookup with a callback
+  // is synchronous on most resolvers (c-ares), so the result is populated
+  // before the call returns.
+  const publicResolvers = ['8.8.8.8', '1.1.1.1', '8.8.4.4'];
+  const beforeServers = dns.getServers();
+  for (const resolver of publicResolvers) {
+    try {
+      let resolved: string | null = null;
+      let finished = false;
+      dns.setServers([resolver]);
+      try {
+        dns.lookup(hostname, { family: 4, verbatim: true, hints: 0 }, (err, address) => {
+          finished = true;
+          if (!err && address) {
+            resolved = address;
+          }
+        });
+      } finally {
+        dns.setServers(beforeServers);
+      }
+      if (finished && resolved) {
+        logger.info(`Resolved ${hostname} -> ${resolved} via public DNS ${resolver}`);
+        return resolved;
+      }
+    } catch {
+      // try next resolver
+    }
   }
 
   return null;
@@ -118,54 +155,25 @@ export const getPrismaClient = (): PrismaClient => {
     prismaInstance = new PrismaClient({
       adapter,
       log:
-        process.env['NODE_ENV'] === 'development'
-          ? [
-              { emit: 'event', level: 'query' },
-              { emit: 'stdout', level: 'error' },
-              { emit: 'stdout', level: 'warn' },
-            ]
-          : [{ emit: 'stdout', level: 'error' }],
+        process.env['NODE_ENV'] === 'production'
+          ? ['error', 'warn']
+          : ['error', 'warn', 'info', 'query'],
     });
   }
   return prismaInstance;
 };
 
-export const connectDatabase = async (
-  maxRetries = 5,
-  initialDelayMs = 1000,
-): Promise<PrismaClient> => {
+export const connectDatabase = async (): Promise<PrismaClient> => {
   const prisma = getPrismaClient();
-  let attempts = 0;
-  let delay = initialDelayMs;
-
-  while (attempts < maxRetries) {
-    try {
-      attempts++;
-      await prisma.$connect();
-      logger.info('Successfully connected to PostgreSQL via Prisma ORM');
-      return prisma;
-    } catch (err: unknown) {
-      logger.warn(
-        `PostgreSQL connection attempt ${attempts}/${maxRetries} failed: ${err instanceof Error ? err.message : String(err)}`,
-      );
-      if (attempts >= maxRetries) {
-        logger.error('Max PostgreSQL connection retries reached. Database unavailable.');
-        throw err;
-      }
-      await new Promise((resolve) => setTimeout(resolve, delay));
-      delay *= 2;
-    }
-  }
-
+  await prisma.$connect();
   return prisma;
 };
 
 export const disconnectDatabase = async (): Promise<void> => {
   if (prismaInstance) {
-    logger.info('Disconnecting Prisma PostgreSQL client...');
     await prismaInstance.$disconnect();
     prismaInstance = null;
-    logger.info('Prisma PostgreSQL client disconnected cleanly.');
+    logger.info('Auth Service database disconnected');
   }
 };
 
@@ -177,10 +185,8 @@ export const checkDatabaseHealth = async (): Promise<{
     const prisma = getPrismaClient();
     await prisma.$queryRaw`SELECT 1`;
     return { ready: true };
-  } catch (err: unknown) {
-    return {
-      ready: false,
-      details: { error: err instanceof Error ? err.message : String(err) },
-    };
+  } catch (err) {
+    logger.error('Database health check failed', { error: String(err) });
+    return { ready: false, details: { error: String(err) } };
   }
 };
