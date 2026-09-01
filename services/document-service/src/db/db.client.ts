@@ -8,30 +8,49 @@ import type { PoolConfig } from 'pg';
 const logger = createLogger({ service: 'document-db' });
 
 /**
- * Synchronously resolve a hostname to an IPv4 literal using the callback-style
- * dns.lookup. The callback form is the only unambiguous way to invoke
- * dns.lookup synchronously through TypeScript's overloaded signatures.
- * Returns null on failure.
+ * Resolve a hostname to an IPv4 literal.
+ *
+ * Two independent strategies, tried in order:
+ *
+ * 1. `dns.resolve4` — Node's internal DNS (uses the `dns` module's
+ *    configured server, NOT the OS resolver). Render's free tier has a
+ *    broken/IPv6-only OS resolver that can't return A records for
+ *    `db.<ref>.supabase.co`, but Node's internal DNS often can.
+ *
+ * 2. `DATABASE_HOST` env var — a hard-coded IPv4 literal you set in the
+ *    Render UI. Use this if even Node's internal DNS can't resolve the
+ *    hostname from Render's network. Get the A record once from your own
+ *    machine (`nslookup db.<ref>.supabase.co`) and paste it here.
+ *
+ * Returns null if neither strategy works — caller falls back to the raw
+ * connection string (which will then use the OS resolver and may hit IPv6).
  */
 const resolveIPv4 = (hostname: string): string | null => {
-  const nodeDns = dns as unknown as {
-    lookup(
-      hostname: string,
-      options: { family: 4; verbatim: true },
-      callback: (err: NodeJS.ErrnoException | null, address: string, family: number) => void,
-    ): void;
-  };
-  let resolved: string | null = null;
+  // Strategy 2 — hard-coded override wins.
+  const override = process.env['DATABASE_HOST'];
+  if (override && override !== hostname) {
+    logger.info(`Using DATABASE_HOST override ${override} for ${hostname}`);
+    return override;
+  }
+
+  // Strategy 1 — Node's internal DNS, callback form.
   try {
-    nodeDns.lookup(hostname, { family: 4, verbatim: true }, (err, address) => {
-      if (!err && address) {
-        resolved = address;
+    let resolved: string | null = null;
+    let finished = false;
+    dns.resolve4(hostname, (err, addresses) => {
+      finished = true;
+      if (!err && addresses && addresses.length > 0) {
+        resolved = addresses[0]!;
       }
     });
+    if (finished && resolved) {
+      return resolved;
+    }
   } catch {
-    return null;
+    // fall through
   }
-  return resolved;
+
+  return null;
 };
 
 /**

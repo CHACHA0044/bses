@@ -8,39 +8,51 @@ import type { PoolConfig } from 'pg';
 const logger = createLogger({ service: 'prisma-client' });
 
 /**
- * Synchronously resolve a hostname to an IPv4 literal address using the
- * callback-style dns.lookup. We use the callback form rather than the
- * overloaded `dns.lookup(host, options)` because the overloaded signature
- * only exposes a Promise-based return type to TypeScript. The callback
- * form is fully synchronous when invoked with `verbatim: true` and the
- * resolver honors the family=4 hint, so the result is available before
- * the call returns.
+ * Resolve a hostname to an IPv4 literal.
  *
- * Returns null if resolution fails (e.g. the host has no A records).
+ * Two independent strategies, tried in order:
+ *
+ * 1. `dns.resolve4` — Node's internal DNS (uses the `dns` module's
+ *    configured server, NOT the OS resolver). Render's free tier has a
+ *    broken/IPv6-only OS resolver that can't return A records for
+ *    `db.<ref>.supabase.co`, but Node's internal DNS often can. This is
+ *    the first thing we try.
+ *
+ * 2. `DATABASE_HOST` env var — a hard-coded IPv4 literal you set in the
+ *    Render UI. Use this if even Node's internal DNS can't resolve the
+ *    hostname from Render's network. Get the A record once from your own
+ *    machine (`nslookup db.<ref>.supabase.co`) and paste it here.
+ *
+ * Returns null if neither strategy works — caller falls back to the raw
+ * connection string (which will then use the OS resolver and may hit IPv6).
  */
 const resolveIPv4 = (hostname: string): string | null => {
-  // `verbatim: true` ensures the family hint is honored (no AAAA fallback).
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const nodeDns = dns as unknown as {
-    lookup(
-      hostname: string,
-      options: { family: 4; verbatim: true },
-      callback: (err: NodeJS.ErrnoException | null, address: string, family: number) => void,
-    ): void;
-  };
-  let resolved: string | null = null;
-  let finished = false;
+  // Strategy 2 — hard-coded override wins.
+  const override = process.env['DATABASE_HOST'];
+  if (override && override !== hostname) {
+    logger.info(`Using DATABASE_HOST override ${override} for ${hostname}`);
+    return override;
+  }
+
+  // Strategy 1 — Node's internal DNS, callback form (synchronous on most
+  // resolvers but we still wrap defensively in case the callback fires async).
   try {
-    nodeDns.lookup(hostname, { family: 4, verbatim: true }, (err, address) => {
+    let resolved: string | null = null;
+    let finished = false;
+    dns.resolve4(hostname, (err, addresses) => {
       finished = true;
-      if (!err && address) {
-        resolved = address;
+      if (!err && addresses && addresses.length > 0) {
+        resolved = addresses[0]!;
       }
     });
+    if (finished && resolved) {
+      return resolved;
+    }
   } catch {
-    return null;
+    // fall through
   }
-  return finished && resolved ? resolved : null;
+
+  return null;
 };
 
 /**
@@ -49,15 +61,12 @@ const resolveIPv4 = (hostname: string): string | null => {
  * Why: Render's free tier does not expose IPv6. Supabase hostnames
  * (`db.<ref>.supabase.co`) resolve to both A and AAAA records and the
  * underlying `pg` pool can still pick the IPv6 address depending on the
- * Node/OS resolver — even with `dns.setDefaultResultOrder('ipv4first')`,
- * which only affects `dns.lookup`, not every code path pg may take.
+ * Node/OS resolver. By pre-resolving the hostname ourselves and passing the
+ * literal IPv4 address into `PoolConfig.host`, DNS is taken out of the
+ * runtime path entirely: pg will *only* see an IPv4 socket and ENETUNREACH
+ * is impossible.
  *
- * By pre-resolving the hostname ourselves and passing the literal IPv4
- * address into `PoolConfig.host`, DNS is taken out of the runtime path
- * entirely: pg will *only* see the IPv4 socket and ENETUNREACH is impossible.
- *
- * Falls back to the raw connection string (with normal DNS) if the IPv4
- * lookup fails — local dev with localhost / 127.0.0.1 is short-circuited.
+ * Falls back to the raw connection string if IPv4 resolution fails.
  */
 const buildPoolConfig = (): PoolConfig => {
   const raw = process.env['DATABASE_URL'];
