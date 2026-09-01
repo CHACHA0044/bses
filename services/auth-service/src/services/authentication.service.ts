@@ -65,19 +65,26 @@ export class AuthenticationService {
 
     // 1. Validate password match & complexity
     if (dto.password !== dto.confirmPassword) {
-      throw new ValidationError('Passwords do not match', { confirmPassword: ['Password confirmation does not match password'] });
+      throw new ValidationError('Passwords do not match', {
+        confirmPassword: ['Password confirmation does not match password'],
+      });
     }
 
     const passValidation = passwordService.validatePasswordStrength(dto.password);
     if (!passValidation.valid) {
-      throw new ValidationError(passValidation.message || 'Invalid password complexity', { password: [passValidation.message || 'Password failed complexity validation'] });
+      throw new ValidationError(passValidation.message || 'Invalid password complexity', {
+        password: [passValidation.message || 'Password failed complexity validation'],
+      });
     }
 
     // 2. Validate DPDP Consent
     if (!dto.dpdpConsent || !dto.privacyPolicyAccepted) {
-      throw new ValidationError('Explicit DPDP consent and Privacy Policy acceptance are required for registration', {
-        dpdpConsent: ['Consent is required under DPDP Act 2023'],
-      });
+      throw new ValidationError(
+        'Explicit DPDP consent and Privacy Policy acceptance are required for registration',
+        {
+          dpdpConsent: ['Consent is required under DPDP Act 2023'],
+        },
+      );
     }
 
     // 3. Duplicate checks
@@ -143,12 +150,20 @@ export class AuthenticationService {
     });
 
     // 6. Generate Tokens
-    const accessToken = tokenService.generateAccessToken({ userId: user.id, username: user.username, role: user.role as any });
+    const accessToken = tokenService.generateAccessToken({
+      userId: user.id,
+      username: user.username,
+      role: user.role as any,
+    });
     const refreshToken = tokenService.generateRefreshToken(user.id);
     const refreshTokenHash = tokenService.hashToken(refreshToken);
 
     const refreshTokenExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
-    await refreshTokenRepository.createRefreshToken({ userId: user.id, tokenHash: refreshTokenHash, expiresAt: refreshTokenExpiresAt });
+    await refreshTokenRepository.createRefreshToken({
+      userId: user.id,
+      tokenHash: refreshTokenHash,
+      expiresAt: refreshTokenExpiresAt,
+    });
 
     // 7. Audit log
     await auditService.logAction({
@@ -172,6 +187,14 @@ export class AuthenticationService {
    * Log in user or admin with brute-force protection and account locking.
    */
   public async login(dto: LoginDTO): Promise<{ user: any; tokens: AuthTokens }> {
+    // [LOGIN_ATTEMPT_START] — mirrors the controller-level log but fires inside
+    // the service so we can correlate the Render log line to the exact code
+    // path (user vs admin flow, before any DB reads).
+    logger.info(
+      `[LOGIN_ATTEMPT_START] identifier=${dto.identifier.substring(0, 2)}*** ` +
+        `ip=${dto.ipAddress} timestamp=${new Date().toISOString()}`,
+    );
+
     // 1. Find user or admin
     let user = await userRepository.findByUsernameOrEmail(dto.identifier);
 
@@ -186,13 +209,27 @@ export class AuthenticationService {
         throw new AuthenticationError('Invalid credentials');
       }
 
-      const accessToken = tokenService.generateAccessToken({ userId: admin.id, username: admin.email, role: admin.role as any });
+      const accessToken = tokenService.generateAccessToken({
+        userId: admin.id,
+        username: admin.email,
+        role: admin.role as any,
+      });
       const refreshToken = tokenService.generateRefreshToken(admin.id);
       const refreshTokenHash = tokenService.hashToken(refreshToken);
 
-      await refreshTokenRepository.createRefreshToken({ adminId: admin.id, tokenHash: refreshTokenHash, expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) });
+      await refreshTokenRepository.createRefreshToken({
+        adminId: admin.id,
+        tokenHash: refreshTokenHash,
+        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+      });
       // Audit logs reference users only — admin id does not exist in users (FK)
-      await auditService.logAction({ userId: null, performedBy: admin.email, action: AuditAction.USER_LOGIN, module: 'AUTH', ipAddress: dto.ipAddress });
+      await auditService.logAction({
+        userId: null,
+        performedBy: admin.email,
+        action: AuditAction.USER_LOGIN,
+        module: 'AUTH',
+        ipAddress: dto.ipAddress,
+      });
 
       return {
         user: this.sanitizeAdmin(admin),
@@ -203,13 +240,17 @@ export class AuthenticationService {
     // 2. Check if account is locked
     if (user.lockedUntil && user.lockedUntil > new Date()) {
       const remainingMinutes = Math.ceil((user.lockedUntil.getTime() - Date.now()) / (60 * 1000));
-      throw new AuthenticationError(`Account locked due to multiple failed login attempts. Try again in ${remainingMinutes} minutes.`);
+      throw new AuthenticationError(
+        `Account locked due to multiple failed login attempts. Try again in ${remainingMinutes} minutes.`,
+      );
     }
 
     // 3. Verify password
     const isPasswordValid = await passwordService.comparePassword(dto.password, user.passwordHash);
     if (!isPasswordValid) {
-      const { failedLoginAttempts, lockedUntil } = await userRepository.incrementFailedAttempts(user.id);
+      const { failedLoginAttempts, lockedUntil } = await userRepository.incrementFailedAttempts(
+        user.id,
+      );
 
       await auditService.logAction({
         userId: user.id,
@@ -220,21 +261,35 @@ export class AuthenticationService {
       });
 
       if (lockedUntil) {
-        throw new AuthenticationError('Account locked due to 5 consecutive failed login attempts. Please try again after 15 minutes.');
+        throw new AuthenticationError(
+          'Account locked due to 5 consecutive failed login attempts. Please try again after 15 minutes.',
+        );
       }
-      throw new AuthenticationError(`Invalid credentials. ${5 - failedLoginAttempts} attempt(s) remaining before account lockout.`);
+      throw new AuthenticationError(
+        `Invalid credentials. ${5 - failedLoginAttempts} attempt(s) remaining before account lockout.`,
+      );
     }
 
     // 4. Successful login — update last login timestamp and reset failed attempts
     await userRepository.updateLastLogin(user.id);
 
     // 5. Issue JWT tokens
-    const accessToken = tokenService.generateAccessToken({ userId: user.id, username: user.username, role: user.role as any });
+    const accessToken = tokenService.generateAccessToken({
+      userId: user.id,
+      username: user.username,
+      role: user.role as any,
+    });
     const refreshToken = tokenService.generateRefreshToken(user.id);
     const refreshTokenHash = tokenService.hashToken(refreshToken);
 
-    const refreshTokenExpiresAt = new Date(Date.now() + (dto.rememberMe ? 30 : 7) * 24 * 60 * 60 * 1000);
-    await refreshTokenRepository.createRefreshToken({ userId: user.id, tokenHash: refreshTokenHash, expiresAt: refreshTokenExpiresAt });
+    const refreshTokenExpiresAt = new Date(
+      Date.now() + (dto.rememberMe ? 30 : 7) * 24 * 60 * 60 * 1000,
+    );
+    await refreshTokenRepository.createRefreshToken({
+      userId: user.id,
+      tokenHash: refreshTokenHash,
+      expiresAt: refreshTokenExpiresAt,
+    });
 
     // 6. Audit log
     await auditService.logAction({
@@ -274,12 +329,20 @@ export class AuthenticationService {
         throw new AuthenticationError('Admin associated with refresh token no longer exists');
       }
 
-      const newAccessToken = tokenService.generateAccessToken({ userId: admin.id, username: admin.email, role: admin.role as any });
+      const newAccessToken = tokenService.generateAccessToken({
+        userId: admin.id,
+        username: admin.email,
+        role: admin.role as any,
+      });
       const newRefreshToken = tokenService.generateRefreshToken(admin.id);
       const newRefreshTokenHash = tokenService.hashToken(newRefreshToken);
 
       await refreshTokenRepository.revokeToken(storedToken.id, newRefreshTokenHash);
-      await refreshTokenRepository.createRefreshToken({ adminId: admin.id, tokenHash: newRefreshTokenHash, expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) });
+      await refreshTokenRepository.createRefreshToken({
+        adminId: admin.id,
+        tokenHash: newRefreshTokenHash,
+        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+      });
 
       return {
         accessToken: newAccessToken,
@@ -293,13 +356,21 @@ export class AuthenticationService {
     }
 
     // Generate new access and refresh tokens (Rotation)
-    const newAccessToken = tokenService.generateAccessToken({ userId: user.id, username: user.username, role: user.role as any });
+    const newAccessToken = tokenService.generateAccessToken({
+      userId: user.id,
+      username: user.username,
+      role: user.role as any,
+    });
     const newRefreshToken = tokenService.generateRefreshToken(user.id);
     const newRefreshTokenHash = tokenService.hashToken(newRefreshToken);
 
     // Revoke old token & store new token
     await refreshTokenRepository.revokeToken(storedToken.id, newRefreshTokenHash);
-    await refreshTokenRepository.createRefreshToken({ userId: user.id, tokenHash: newRefreshTokenHash, expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) });
+    await refreshTokenRepository.createRefreshToken({
+      userId: user.id,
+      tokenHash: newRefreshTokenHash,
+      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+    });
 
     return {
       accessToken: newAccessToken,
@@ -310,7 +381,11 @@ export class AuthenticationService {
   /**
    * Logs out user by revoking current refresh token.
    */
-  public async logout(userId: string, rawRefreshToken?: string, ipAddress = '0.0.0.0'): Promise<void> {
+  public async logout(
+    userId: string,
+    rawRefreshToken?: string,
+    ipAddress = '0.0.0.0',
+  ): Promise<void> {
     if (rawRefreshToken) {
       const tokenHash = tokenService.hashToken(rawRefreshToken);
       const stored = await refreshTokenRepository.findByTokenHash(tokenHash);
@@ -363,10 +438,16 @@ export class AuthenticationService {
   /**
    * Resets password using a valid reset token.
    */
-  public async resetPassword(rawToken: string, newPassword: string, ipAddress: string): Promise<void> {
+  public async resetPassword(
+    rawToken: string,
+    newPassword: string,
+    ipAddress: string,
+  ): Promise<void> {
     const passValidation = passwordService.validatePasswordStrength(newPassword);
     if (!passValidation.valid) {
-      throw new ValidationError(passValidation.message || 'Password failed complexity requirements');
+      throw new ValidationError(
+        passValidation.message || 'Password failed complexity requirements',
+      );
     }
 
     const tokenHash = tokenService.hashToken(rawToken);
@@ -396,18 +477,28 @@ export class AuthenticationService {
   /**
    * Changes current password for logged-in user.
    */
-  public async changePassword(userId: string, currentPass: string, newPass: string, ipAddress: string): Promise<void> {
+  public async changePassword(
+    userId: string,
+    currentPass: string,
+    newPass: string,
+    ipAddress: string,
+  ): Promise<void> {
     const user = await userRepository.findById(userId);
     if (!user) throw new NotFoundError('User');
 
     const isValid = await passwordService.comparePassword(currentPass, user.passwordHash);
     if (!isValid) {
-      throw new ValidationError('Current password is incorrect', { currentPassword: ['Current password does not match'] });
+      throw new ValidationError('Current password is incorrect', {
+        currentPassword: ['Current password does not match'],
+      });
     }
 
     const passValidation = passwordService.validatePasswordStrength(newPass);
     if (!passValidation.valid) {
-      throw new ValidationError(passValidation.message || 'New password failed complexity requirements', { newPassword: [passValidation.message || 'Complexity check failed'] });
+      throw new ValidationError(
+        passValidation.message || 'New password failed complexity requirements',
+        { newPassword: [passValidation.message || 'Complexity check failed'] },
+      );
     }
 
     const newPasswordHash = await passwordService.hashPassword(newPass);
@@ -471,8 +562,12 @@ export class AuthenticationService {
    * Strips password hash and decrypts PII for user profile responses.
    */
   private sanitizeUser(user: any, includeDecrypted = false): any {
-    const decryptedMobile = user.mobileEncrypted ? encryptionService.decrypt(user.mobileEncrypted) : null;
-    const decryptedAadhaar = user.aadhaarEncrypted ? encryptionService.decrypt(user.aadhaarEncrypted) : null;
+    const decryptedMobile = user.mobileEncrypted
+      ? encryptionService.decrypt(user.mobileEncrypted)
+      : null;
+    const decryptedAadhaar = user.aadhaarEncrypted
+      ? encryptionService.decrypt(user.aadhaarEncrypted)
+      : null;
 
     return {
       id: user.id,

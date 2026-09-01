@@ -1,5 +1,5 @@
 import type { Request, Response, NextFunction } from 'express';
-import { sendSuccess, sendCreated, JWT } from '@bses/shared';
+import { sendSuccess, sendCreated, JWT, createLogger } from '@bses/shared';
 import { authenticationService } from '../services/authentication.service';
 import { captchaService } from '../services/captcha.service';
 import {
@@ -11,8 +11,26 @@ import {
 } from '../validators/auth.validator';
 import { config } from '../config';
 
+const logger = createLogger({ service: 'auth-controller' });
+
+/**
+ * Redact a user-supplied identifier so the audit log can still show that an
+ * attempt was made without leaking the full email/username (which may be a
+ * sensitive identifier). Keeps the first 2 chars for context.
+ */
+const redactIdentifier = (raw: unknown): string => {
+  if (typeof raw !== 'string' || raw.length === 0) return '***';
+  if (raw.length <= 2) return `${raw[0]}*`;
+  return `${raw.substring(0, 2)}***`;
+};
+
 export class AuthController {
-  private setCookies(res: Response, accessToken: string, refreshToken: string, rememberMe = false): void {
+  private setCookies(
+    res: Response,
+    accessToken: string,
+    refreshToken: string,
+    rememberMe = false,
+  ): void {
     const isProduction = config.NODE_ENV === 'production';
     // Cross-site cookie after deploying frontend (Vercel) and backend (Render) on
     // different registrable domains requires SameSite=None (an enforcement of
@@ -49,8 +67,20 @@ export class AuthController {
 
   public register = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
-      const validated = registerSchema.parse(req.body);
+      // Log the attempt at the very top of the request handler — this fires
+      // even if validation/Database calls fail or hang, so the operator can
+      // see in Render that a registration request was received.
       const ipAddress = (req.headers['x-forwarded-for'] as string) || req.ip || '0.0.0.0';
+      logger.info(
+        `[REGISTER_ATTEMPT] timestamp=${new Date().toISOString()} ` +
+          `requestId=${(req as { correlationId?: string }).correlationId || 'n/a'} ` +
+          `username=${redactIdentifier((req.body as { username?: string })?.username)} ` +
+          `email=${redactIdentifier((req.body as { email?: string })?.email)} ` +
+          `ip=${ipAddress}`,
+      );
+
+      const validated = registerSchema.parse(req.body);
+      const ipAddressFinal = (req.headers['x-forwarded-for'] as string) || req.ip || '0.0.0.0';
 
       const result = await authenticationService.register({
         ...validated,
@@ -58,11 +88,15 @@ export class AuthController {
         aadhaar: validated.aadhaar ?? null,
         caNumber: validated.caNumber ?? null,
         meterNumber: validated.meterNumber ?? null,
-        ipAddress,
+        ipAddress: ipAddressFinal,
       });
       this.setCookies(res, result.tokens.accessToken, result.tokens.refreshToken);
 
-      sendCreated(res, { user: result.user, accessToken: result.tokens.accessToken }, 'Registration successful');
+      sendCreated(
+        res,
+        { user: result.user, accessToken: result.tokens.accessToken },
+        'Registration successful',
+      );
     } catch (err) {
       next(err);
     }
@@ -70,13 +104,35 @@ export class AuthController {
 
   public login = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
-      const validated = loginSchema.parse(req.body);
+      // Structured login-attempt log — fires BEFORE validation and BEFORE any
+      // database call. This guarantees Render shows the attempt timestamp,
+      // correlation ID, redacted identifier, and IP, even if the service
+      // hangs or crashes further down the stack.
       const ipAddress = (req.headers['x-forwarded-for'] as string) || req.ip || '0.0.0.0';
+      logger.info(
+        `[LOGIN_ATTEMPT] timestamp=${new Date().toISOString()} ` +
+          `requestId=${(req as { correlationId?: string }).correlationId || 'n/a'} ` +
+          `identifier=${redactIdentifier((req.body as { identifier?: string })?.identifier)} ` +
+          `rememberMe=${(req.body as { rememberMe?: boolean })?.rememberMe === true} ` +
+          `ip=${ipAddress}`,
+      );
 
-      const result = await authenticationService.login({ ...validated, ipAddress });
-      this.setCookies(res, result.tokens.accessToken, result.tokens.refreshToken, validated.rememberMe);
+      const validated = loginSchema.parse(req.body);
+      const ipAddressFinal = (req.headers['x-forwarded-for'] as string) || req.ip || '0.0.0.0';
 
-      sendSuccess(res, { user: result.user, accessToken: result.tokens.accessToken }, 'Login successful');
+      const result = await authenticationService.login({ ...validated, ipAddress: ipAddressFinal });
+      this.setCookies(
+        res,
+        result.tokens.accessToken,
+        result.tokens.refreshToken,
+        validated.rememberMe,
+      );
+
+      sendSuccess(
+        res,
+        { user: result.user, accessToken: result.tokens.accessToken },
+        'Login successful',
+      );
     } catch (err) {
       next(err);
     }
@@ -111,13 +167,21 @@ export class AuthController {
     }
   };
 
-  public forgotPassword = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  public forgotPassword = async (
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ): Promise<void> => {
     try {
       const { email } = forgotPasswordSchema.parse(req.body);
       const ipAddress = (req.headers['x-forwarded-for'] as string) || req.ip || '0.0.0.0';
 
       await authenticationService.forgotPassword(email, ipAddress);
-      sendSuccess(res, null, 'If an account exists with this email, password reset instructions have been dispatched.');
+      sendSuccess(
+        res,
+        null,
+        'If an account exists with this email, password reset instructions have been dispatched.',
+      );
     } catch (err) {
       next(err);
     }
@@ -140,9 +204,15 @@ export class AuthController {
     }
   };
 
-  public changePassword = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  public changePassword = async (
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ): Promise<void> => {
     try {
-      const { currentPassword, newPassword, confirmPassword } = changePasswordSchema.parse(req.body);
+      const { currentPassword, newPassword, confirmPassword } = changePasswordSchema.parse(
+        req.body,
+      );
       if (newPassword !== confirmPassword) {
         throw new Error('Password confirmation does not match');
       }

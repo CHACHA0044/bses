@@ -32,7 +32,12 @@ import {
 export interface DashboardPayload {
   dashboard?: {
     consumer?: any;
-    stats?: { totalApplications: number; pendingCount: number; approvedCount: number; rejectedCount: number };
+    stats?: {
+      totalApplications: number;
+      pendingCount: number;
+      approvedCount: number;
+      rejectedCount: number;
+    };
     recentConnections?: any[];
   };
 }
@@ -95,26 +100,89 @@ export function DashboardView({ initialData }: { initialData?: DashboardPayload 
   // skeleton, no network); SWR revalidates quietly in the background after
   // the fresh window. On later client navigations the idle PrefetchProvider
   // has already warmed this URL into the shared cache.
-  const { data, loading } = useApiResource<DashboardPayload>('/users/dashboard', { initialData });
+  const { data, loading, error, revalidate } = useApiResource<DashboardPayload>(
+    '/users/dashboard',
+    {
+      initialData,
+    },
+  );
+
+  // Hard fallback timer: even if the underlying axios request is wedged at the
+  // gateway (e.g. database unreachable upstream), never let the user see a
+  // "Loading..." skeleton for more than 15 seconds. After the deadline we
+  // force the error state so the dashboard renders a recoverable error card
+  // with a Retry button instead of spinning forever.
+  const [forceError, setForceError] = React.useState(false);
+  React.useEffect(() => {
+    if (!loading) {
+      setForceError(false);
+      return;
+    }
+    const timer = setTimeout(() => setForceError(true), 15_000);
+    return () => clearTimeout(timer);
+  }, [loading]);
 
   if (loading) {
     return (
       <div className="space-y-8 p-2 max-w-7xl mx-auto">
-        <WelcomeBanner firstName={user?.firstName} lastName={user?.lastName} status={user?.status || 'ACTIVE'} />
+        <WelcomeBanner
+          firstName={user?.firstName}
+          lastName={user?.lastName}
+          status={user?.status || 'ACTIVE'}
+        />
         <DashboardSkeleton />
+      </div>
+    );
+  }
+
+  if (error || forceError) {
+    return (
+      <div className="space-y-8 p-2 max-w-7xl mx-auto">
+        <WelcomeBanner
+          firstName={user?.firstName}
+          lastName={user?.lastName}
+          status={user?.status || 'ACTIVE'}
+        />
+        <div className="rounded-2xl border border-red-200 bg-red-50 p-6 text-center shadow-sm">
+          <AlertCircle className="w-10 h-10 text-red-500 mx-auto mb-3" />
+          <p className="text-red-700 font-extrabold mb-2">Unable to load dashboard</p>
+          <p className="text-red-500 text-sm mb-4 max-w-md mx-auto">
+            The server is taking too long to respond. This usually means the database is temporarily
+            unavailable. Your login was successful — please retry in a moment.
+          </p>
+          <Button
+            variant="danger"
+            size="sm"
+            onClick={() => {
+              setForceError(false);
+              void revalidate();
+            }}
+          >
+            Retry
+          </Button>
+        </div>
       </div>
     );
   }
 
   const dashboard = data?.dashboard ?? {};
   const consumer = dashboard.consumer || user;
-  const stats = dashboard.stats || { totalApplications: 0, pendingCount: 0, approvedCount: 0, rejectedCount: 0 };
+  const stats = dashboard.stats || {
+    totalApplications: 0,
+    pendingCount: 0,
+    approvedCount: 0,
+    rejectedCount: 0,
+  };
   const recentConnections = dashboard.recentConnections || [];
 
   return (
     <div className="space-y-8 p-2 max-w-7xl mx-auto">
       {/* Welcome Banner */}
-      <WelcomeBanner firstName={consumer?.firstName} lastName={consumer?.lastName} status={consumer?.status || 'ACTIVE'}>
+      <WelcomeBanner
+        firstName={consumer?.firstName}
+        lastName={consumer?.lastName}
+        status={consumer?.status || 'ACTIVE'}
+      >
         {/* Buttons — PrefetchLink warms the destination on hover/focus/touch
             so the click itself feels instant. */}
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
@@ -124,7 +192,12 @@ export function DashboardView({ initialData }: { initialData?: DashboardPayload 
             </Button>
           </PrefetchLink>
           <PrefetchLink href="/profile" dataUrls={['/users/profile']} className="w-full sm:w-auto">
-            <Button variant="ghost-white" size="md" fullWidth leftIcon={<User className="w-4 h-4" />}>
+            <Button
+              variant="ghost-white"
+              size="md"
+              fullWidth
+              leftIcon={<User className="w-4 h-4" />}
+            >
               View Profile
             </Button>
           </PrefetchLink>
@@ -139,17 +212,43 @@ export function DashboardView({ initialData }: { initialData?: DashboardPayload 
             <span>Cyber Fraud Alert — Stay Vigilant!</span>
           </p>
           <p className="leading-relaxed text-amber-800">
-            BSES never asks consumers to download unknown APK apps or make power bill payments via personal WhatsApp numbers. Bill payments are accepted only through this portal or BSES channels.
+            BSES never asks consumers to download unknown APK apps or make power bill payments via
+            personal WhatsApp numbers. Bill payments are accepted only through this portal or BSES
+            channels.
           </p>
         </div>
       </div>
 
       {/* Application Statistics */}
       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
-        <StatCard label="Total Applications" value={stats.totalApplications} icon={FileText} iconWrap="bg-slate-100 text-slate-700" href="/connections" />
-        <StatCard label="Pending Review" value={stats.pendingCount} icon={Clock} iconWrap="bg-amber-50 text-amber-600" href="/connections" />
-        <StatCard label="Approved" value={stats.approvedCount} icon={CheckCircle2} iconWrap="bg-emerald-50 text-emerald-600" href="/connections" />
-        <StatCard label="Rejected" value={stats.rejectedCount} icon={AlertCircle} iconWrap="bg-red-50 text-red-600" href="/connections" />
+        <StatCard
+          label="Total Applications"
+          value={stats.totalApplications}
+          icon={FileText}
+          iconWrap="bg-slate-100 text-slate-700"
+          href="/connections"
+        />
+        <StatCard
+          label="Pending Review"
+          value={stats.pendingCount}
+          icon={Clock}
+          iconWrap="bg-amber-50 text-amber-600"
+          href="/connections"
+        />
+        <StatCard
+          label="Approved"
+          value={stats.approvedCount}
+          icon={CheckCircle2}
+          iconWrap="bg-emerald-50 text-emerald-600"
+          href="/connections"
+        />
+        <StatCard
+          label="Rejected"
+          value={stats.rejectedCount}
+          icon={AlertCircle}
+          iconWrap="bg-red-50 text-red-600"
+          href="/connections"
+        />
       </div>
 
       {/* BSES Discom Network Operational Highlights */}
@@ -160,9 +259,14 @@ export function DashboardView({ initialData }: { initialData?: DashboardPayload 
               <BarChart3 className="w-4 h-4 text-primary" />
               <span>BSES Discom Operational Snapshot (FY 2024-25)</span>
             </h2>
-            <p className="text-xs text-slate-500">Powering 31.89+ Lakh consumers across 700 sq. km in Delhi</p>
+            <p className="text-xs text-slate-500">
+              Powering 31.89+ Lakh consumers across 700 sq. km in Delhi
+            </p>
           </div>
-          <Link href="/about" className="group text-xs font-bold text-primary hover:underline hidden sm:inline-flex items-center gap-1">
+          <Link
+            href="/about"
+            className="group text-xs font-bold text-primary hover:underline hidden sm:inline-flex items-center gap-1"
+          >
             <span>Full Profile</span>
             <ArrowRight className="w-3.5 h-3.5 transition-transform duration-150 group-hover:translate-x-0.5" />
           </Link>
@@ -170,22 +274,30 @@ export function DashboardView({ initialData }: { initialData?: DashboardPayload 
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-center">
           <div className="bg-slate-50 rounded-2xl p-3.5 border border-slate-200/80 space-y-0.5 transition-all duration-150 ease-out hover:border-slate-300 hover:shadow-sm">
-            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Registered Consumers</span>
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+              Registered Consumers
+            </span>
             <p className="text-lg font-extrabold text-slate-900">31.89 Lakhs</p>
             <p className="text-[10px] text-emerald-600 font-bold">+229% since privatization</p>
           </div>
           <div className="bg-slate-50 rounded-2xl p-3.5 border border-slate-200/80 space-y-0.5 transition-all duration-150 ease-out hover:border-slate-300 hover:shadow-sm">
-            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">AT&amp;C Losses Record</span>
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+              AT&amp;C Losses Record
+            </span>
             <p className="text-lg font-extrabold text-emerald-600">6.13%</p>
             <p className="text-[10px] text-slate-500 font-semibold">Down from 51.5% in 2002</p>
           </div>
           <div className="bg-slate-50 rounded-2xl p-3.5 border border-slate-200/80 space-y-0.5 transition-all duration-150 ease-out hover:border-slate-300 hover:shadow-sm">
-            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Peak Load Capacity</span>
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+              Peak Load Capacity
+            </span>
             <p className="text-lg font-extrabold text-amber-600">3,809 MW</p>
             <p className="text-[10px] text-slate-500 font-semibold">114 EHV Grid Stations</p>
           </div>
           <div className="bg-slate-50 rounded-2xl p-3.5 border border-slate-200/80 space-y-0.5 transition-all duration-150 ease-out hover:border-slate-300 hover:shadow-sm">
-            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Power Transformers</span>
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+              Power Transformers
+            </span>
             <p className="text-lg font-extrabold text-slate-900">293 Units</p>
             <p className="text-[10px] text-slate-500 font-semibold">11,161 Dist. Transformers</p>
           </div>
@@ -211,7 +323,8 @@ export function DashboardView({ initialData }: { initialData?: DashboardPayload 
             </div>
           </div>
           <p className="text-xs text-slate-600 leading-relaxed">
-            Express interest or apply online for Solar Rooftop Net-Metering installation and claim government subsidies.
+            Express interest or apply online for Solar Rooftop Net-Metering installation and claim
+            government subsidies.
           </p>
           <span className="inline-flex items-center gap-1.5 text-xs font-bold text-amber-700 underline">
             <span>Express Solar Interest</span>
@@ -236,7 +349,8 @@ export function DashboardView({ initialData }: { initialData?: DashboardPayload 
             </div>
           </div>
           <p className="text-xs text-slate-600 leading-relaxed">
-            Request single-window connection setup for Electric Vehicle (EV) charging stations at residential &amp; commercial spots.
+            Request single-window connection setup for Electric Vehicle (EV) charging stations at
+            residential &amp; commercial spots.
           </p>
           <span className="inline-flex items-center gap-1.5 text-xs font-bold text-blue-700 underline">
             <span>Apply for EV Connection</span>
@@ -259,7 +373,8 @@ export function DashboardView({ initialData }: { initialData?: DashboardPayload 
             </div>
           </div>
           <p className="text-xs text-slate-600 leading-relaxed">
-            Download E-PLA forms and file billing dispute applications online for amicable out-of-court settlements.
+            Download E-PLA forms and file billing dispute applications online for amicable
+            out-of-court settlements.
           </p>
           <span className="inline-flex items-center gap-1.5 text-xs font-bold text-emerald-700 underline">
             <span>View E-PLA Details</span>
@@ -285,8 +400,12 @@ export function DashboardView({ initialData }: { initialData?: DashboardPayload 
         {recentConnections.length === 0 ? (
           <div className="text-center py-10 space-y-3 bg-slate-50 rounded-2xl border border-dashed border-slate-200">
             <FolderOpen className="w-10 h-10 text-slate-400 mx-auto" />
-            <p className="text-sm font-bold text-slate-700">No electricity connection requests found</p>
-            <p className="text-xs text-slate-400">Apply for a new domestic, commercial, or industrial connection online.</p>
+            <p className="text-sm font-bold text-slate-700">
+              No electricity connection requests found
+            </p>
+            <p className="text-xs text-slate-400">
+              Apply for a new domestic, commercial, or industrial connection online.
+            </p>
             <PrefetchLink href="/connections/apply">
               <Button variant="secondary" size="sm" className="mt-2">
                 Start New Application
@@ -315,7 +434,9 @@ export function DashboardView({ initialData }: { initialData?: DashboardPayload 
                     <td className="p-3">
                       <StatusChip status={conn.status} />
                     </td>
-                    <td className="p-3 text-xs text-slate-400">{new Date(conn.updatedAt).toLocaleDateString()}</td>
+                    <td className="p-3 text-xs text-slate-400">
+                      {new Date(conn.updatedAt).toLocaleDateString()}
+                    </td>
                     <td className="p-3">
                       <PrefetchLink
                         href={`/connections/${conn.id}`}

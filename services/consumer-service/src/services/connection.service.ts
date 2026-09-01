@@ -1,5 +1,5 @@
 import { ConnectionStatus, ConnectionType, AuditAction, WorkflowActionType } from '@prisma/client';
-import { NotFoundError, ValidationError, ConflictError } from '@bses/shared';
+import { NotFoundError, ValidationError, ConflictError, createLogger } from '@bses/shared';
 import { connectionRepository, UpdateConnectionData } from '../repositories/connection.repository';
 import { workflowRepository } from '../repositories/workflow.repository';
 import { userRepository } from '../repositories/user.repository';
@@ -8,6 +8,8 @@ import { workflowService } from './workflow.service';
 import { encryptionService, toDocumentViews } from '@bses/shared';
 import { IN_PROGRESS_STATUSES, SUCCESS_STATUSES } from '../config/connectionWorkflow';
 import { getPrismaClient } from '../db/db.client';
+
+const logger = createLogger({ service: 'connection-service' });
 
 export interface ApplyConnectionDTO {
   connectionType: ConnectionType;
@@ -116,7 +118,11 @@ export class ConnectionService {
     return this.toSafeConnections(await connectionRepository.findByUserId(userId));
   }
 
-  public async getConnectionById(userId: string, connectionId: string, isAdmin = false): Promise<any> {
+  public async getConnectionById(
+    userId: string,
+    connectionId: string,
+    isAdmin = false,
+  ): Promise<any> {
     const connection = await connectionRepository.findById(connectionId);
     if (!connection) throw new NotFoundError('Connection Application');
 
@@ -127,7 +133,11 @@ export class ConnectionService {
     return this.toSafeConnection(connection);
   }
 
-  public async updateConnection(userId: string, connectionId: string, dto: UpdateConnectionDTO): Promise<any> {
+  public async updateConnection(
+    userId: string,
+    connectionId: string,
+    dto: UpdateConnectionDTO,
+  ): Promise<any> {
     const connection = await connectionRepository.findById(connectionId);
     if (!connection) throw new NotFoundError('Connection Application');
 
@@ -135,7 +145,10 @@ export class ConnectionService {
       throw new ValidationError('Access denied to this connection application');
     }
 
-    if (connection.status !== ConnectionStatus.DRAFT && connection.status !== ConnectionStatus.DOCUMENTS_PENDING) {
+    if (
+      connection.status !== ConnectionStatus.DRAFT &&
+      connection.status !== ConnectionStatus.DOCUMENTS_PENDING
+    ) {
       throw new ValidationError('Only DRAFT or DOCUMENTS_PENDING applications can be modified');
     }
 
@@ -170,6 +183,11 @@ export class ConnectionService {
   }
 
   public async getDashboardData(userId: string): Promise<any> {
+    // [DASHBOARD_FETCH_START] — fires immediately on handler entry so we can
+    // correlate the Render log to the exact user+timestamp of the dashboard
+    // request, even if Postgres is slow/unreachable downstream.
+    logger.info(`[DASHBOARD_FETCH_START] userId=${userId} timestamp=${new Date().toISOString()}`);
+
     const user = await userRepository.findById(userId);
     if (!user) throw new NotFoundError('User');
 
@@ -178,7 +196,9 @@ export class ConnectionService {
     // must never appear on a consumer's dashboard.
     const recentLogs = await auditRepository.listRecentLogs(5, userId);
 
-    const decryptedMobile = user.mobileEncrypted ? encryptionService.decrypt(user.mobileEncrypted) : null;
+    const decryptedMobile = user.mobileEncrypted
+      ? encryptionService.decrypt(user.mobileEncrypted)
+      : null;
 
     return {
       consumer: {
@@ -196,7 +216,9 @@ export class ConnectionService {
         pendingCount: connections.filter((c) => IN_PROGRESS_STATUSES.includes(c.status)).length,
         approvedCount: connections.filter((c) => SUCCESS_STATUSES.includes(c.status)).length,
         rejectedCount: connections.filter((c) => c.status === ConnectionStatus.REJECTED).length,
-        completedCount: connections.filter((c) => c.status === ConnectionStatus.CONNECTION_COMPLETED).length,
+        completedCount: connections.filter(
+          (c) => c.status === ConnectionStatus.CONNECTION_COMPLETED,
+        ).length,
       },
       recentConnections: this.toSafeConnections(connections.slice(0, 5)),
       recentActivity: recentLogs,
