@@ -1,8 +1,28 @@
 import axios from 'axios';
 
+/**
+ * baseURL strategy
+ *
+ * The Vercel-deployed frontend and the Render-deployed gateway live on
+ * DIFFERENT registrable domains. If the browser talks to the gateway
+ * directly (cross-origin), the `Set-Cookie` response headers are scoped
+ * to the gateway's domain and the Vercel-side middleware can never see
+ * them — the user gets bounced back to /login after every successful
+ * login/register.
+ *
+ * Solution: talk to a SAME-ORIGIN path (`/api/...`) and let the
+ * catch-all Next.js route at `app/api/[...path]/route.ts` proxy the
+ * request to the gateway server-side. The proxy:
+ *   - forwards the browser's `Cookie` header on every request, and
+ *   - forwards the upstream's `Set-Cookie` headers back to the browser
+ *     on the Vercel origin so the middleware sees them.
+ *
+ * The cross-site render of `NEXT_PUBLIC_API_URL` is still available for
+ * server-side code that needs the absolute URL.
+ */
 export const apiClient = axios.create({
-  baseURL: process.env['NEXT_PUBLIC_API_URL'] || 'http://localhost:3000/api',
-  withCredentials: true, // Send HTTP-Only cookies
+  baseURL: '/api',
+  withCredentials: true, // Send HTTP-Only cookies (now same-origin)
   timeout: 10_000, // No request may hang indefinitely — reject after 10s
 });
 
@@ -29,7 +49,12 @@ apiClient.interceptors.response.use(
     const originalRequest = error.config;
 
     // Handle token refresh automatically if 401 occurs and request hasn't been retried
-    if (error.response?.status === 401 && !originalRequest._retry && !originalRequest.url?.includes('/auth/login') && !originalRequest.url?.includes('/auth/refresh')) {
+    if (
+      error.response?.status === 401 &&
+      !originalRequest._retry &&
+      !originalRequest.url?.includes('/auth/login') &&
+      !originalRequest.url?.includes('/auth/refresh')
+    ) {
       originalRequest._retry = true;
       try {
         if (!refreshPromise) {

@@ -7,17 +7,11 @@ const nextConfig = {
   experimental: {
     optimizePackageImports: ['lucide-react'],
   },
-  async rewrites() {
-    return [
-      {
-        source: '/api/:path*',
-        // NEXT_PUBLIC_API_URL already ends with '/api' (e.g. http://localhost:3000/api),
-        // so appending '/:path*' avoids the double '/api/api/...' produced by
-        // concatenating the old '/api/:path*' suffix.
-        destination: (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000/api') + '/:path*',
-      },
-    ];
-  },
+  // The catch-all API proxy lives at `src/app/api/[...path]/route.ts` and
+  // forwards `/api/*` to the gateway server-side while preserving
+  // cookies both ways. We deliberately do NOT use rewrites() here because
+  // Next.js rewrites silently strip Set-Cookie / Cookie headers, which
+  // would still leave the user with a session the middleware can't see.
 };
 
 export default nextConfig;
