@@ -83,6 +83,59 @@ function buildCorsHeaders(origin: string | null): HeadersInit {
   return headers;
 }
 
+interface ParsedCookie {
+  name: string;
+  value: string;
+  path?: string;
+  maxAge?: number;
+  expires?: Date;
+  sameSite?: 'lax' | 'strict' | 'none';
+  secure?: boolean;
+  httpOnly?: boolean;
+}
+
+function parseCookieHeader(cookieStr: string): ParsedCookie | null {
+  const parts = cookieStr.split(';').map((p) => p.trim()).filter(Boolean);
+  if (parts.length === 0) return null;
+
+  const [first, ...attributes] = parts;
+  const eqIdx = first.indexOf('=');
+  if (eqIdx === -1) return null;
+
+  const name = first.substring(0, eqIdx).trim();
+  const value = first.substring(eqIdx + 1).trim();
+  if (!name) return null;
+
+  const result: ParsedCookie = { name, value };
+
+  for (const attr of attributes) {
+    const attrEqIdx = attr.indexOf('=');
+    const key = (attrEqIdx === -1 ? attr : attr.substring(0, attrEqIdx)).trim().toLowerCase();
+    const val = attrEqIdx === -1 ? '' : attr.substring(attrEqIdx + 1).trim();
+
+    if (key === 'path') {
+      result.path = val || '/';
+    } else if (key === 'max-age') {
+      const num = Number(val);
+      if (Number.isFinite(num)) result.maxAge = num;
+    } else if (key === 'expires') {
+      const d = new Date(val);
+      if (!isNaN(d.getTime())) result.expires = d;
+    } else if (key === 'httponly') {
+      result.httpOnly = true;
+    } else if (key === 'secure') {
+      result.secure = true;
+    } else if (key === 'samesite') {
+      const lowerVal = val.toLowerCase();
+      if (lowerVal === 'lax' || lowerVal === 'strict' || lowerVal === 'none') {
+        result.sameSite = lowerVal;
+      }
+    }
+  }
+
+  return result;
+}
+
 async function proxy(
   req: NextRequest,
   ctx: { params: { path: string[] } },
@@ -91,7 +144,6 @@ async function proxy(
   const origin = req.headers.get('origin');
   const upstreamBase = getUpstreamBase();
   const upstreamUrl = joinPath(upstreamBase, ctx.params.path ?? []);
-  const incomingUrl = new URL(req.url);
 
   // Short-circuit CORS preflight.
   if (method === 'OPTIONS') {
@@ -127,9 +179,7 @@ async function proxy(
   if (method !== 'GET' && method !== 'HEAD') {
     const ct = req.headers.get('content-type') ?? '';
     if (ct) {
-      // Use the raw stream so multipart uploads aren't buffered.
       body = req.body as unknown as BodyInit;
-      // node 18 fetch accepts a ReadableStream; cast appropriately.
       if (!upstreamHeaders.has('content-type')) {
         upstreamHeaders.set('content-type', ct);
       }
@@ -142,7 +192,6 @@ async function proxy(
       method,
       headers: upstreamHeaders,
       body,
-      // Required to forward cookies on same-site redirect chains.
       redirect: 'manual',
     });
   } catch (err: any) {
@@ -164,27 +213,7 @@ async function proxy(
     );
   }
 
-  // Build the response, copying status + body + the headers we need.
   const responseHeaders = new Headers(buildCorsHeaders(origin));
-
-  // Forward Set-Cookie headers so the browser stores them on the Vercel
-  // origin (where subsequent middleware checks happen).
-  // Strip any explicit `Domain=` attribute so cookies are saved as host-only cookies
-  // for the current Vercel frontend host, avoiding cross-domain rejection.
-  const rawSetCookies =
-    typeof (upstreamRes.headers as any).getSetCookie === 'function'
-      ? (upstreamRes.headers as any).getSetCookie()
-      : (() => {
-          const setCookie = upstreamRes.headers.get('set-cookie');
-          return setCookie ? setCookie.split(/,(?=[^;]+=[^;]+)/) : [];
-        })();
-
-  for (const cookieStr of rawSetCookies) {
-    if (!cookieStr || !cookieStr.trim()) continue;
-    // Remove Domain=... directive to keep cookie host-only
-    const cleanedCookie = cookieStr.replace(/;\s*Domain=[^;]*/gi, '');
-    responseHeaders.append('Set-Cookie', cleanedCookie.trim());
-  }
 
   // Forward a couple of useful response headers.
   const contentType = upstreamRes.headers.get('content-type');
@@ -196,9 +225,37 @@ async function proxy(
   const contentDisposition = upstreamRes.headers.get('content-disposition');
   if (contentDisposition) responseHeaders.set('Content-Disposition', contentDisposition);
 
-  return new NextResponse(upstreamRes.body, {
+  const response = new NextResponse(upstreamRes.body, {
     status: upstreamRes.status,
     statusText: upstreamRes.statusText,
     headers: responseHeaders,
   });
+
+  // Extract raw Set-Cookie headers from upstream response
+  const rawSetCookies =
+    typeof (upstreamRes.headers as any).getSetCookie === 'function'
+      ? (upstreamRes.headers as any).getSetCookie()
+      : (() => {
+          const setCookie = upstreamRes.headers.get('set-cookie');
+          return setCookie ? setCookie.split(/,(?=[^;]+=[^;]+)/) : [];
+        })();
+
+  // Use Next.js response.cookies.set API to set cookies cleanly on the response
+  for (const cookieStr of rawSetCookies) {
+    const parsed = parseCookieHeader(cookieStr);
+    if (parsed) {
+      response.cookies.set({
+        name: parsed.name,
+        value: parsed.value,
+        path: parsed.path ?? '/',
+        maxAge: parsed.maxAge,
+        expires: parsed.expires,
+        sameSite: parsed.sameSite ?? 'lax',
+        secure: parsed.secure ?? true,
+        httpOnly: parsed.httpOnly ?? true,
+      });
+    }
+  }
+
+  return response;
 }
