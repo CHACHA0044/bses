@@ -46,11 +46,45 @@ class Supervisor {
     });
 
     const gatewayEnv = buildGatewayEnv(env, services);
+    const nonGatewaySpecs = services.filter((s) => !s.isGateway);
+    const gatewaySpec = services.find((s) => s.isGateway);
 
-    for (const spec of services) {
+    const readyPromises: Promise<void>[] = [];
+
+    // Launch internal microservices (auth, consumer, document, notification) first
+    for (const spec of nonGatewaySpecs) {
+      let resolveReady: () => void;
+      const readyPromise = new Promise<void>((res) => {
+        resolveReady = res;
+      });
+      readyPromises.push(readyPromise);
+
       const manager = new ChildManager({
         spec,
-        env: spec.isGateway ? gatewayEnv : buildServiceEnv(env, spec),
+        env: buildServiceEnv(env, spec),
+        onReady: (name) => {
+          logger.info(`[STARTUP] ${name} service initialized`);
+          resolveReady();
+        },
+        onStateChange: () => this.pushStatusToGateway(),
+        onMessage: (pid, message) => this.handleGatewayRequest(pid, message),
+      });
+      this.children.push(manager);
+      manager.start();
+    }
+
+    // Wait until internal microservices are ready (or up to 30s timeout) before launching Gateway
+    logger.info('[STARTUP] Initializing internal microservices before launching public Gateway...');
+    await Promise.race([
+      Promise.all(readyPromises),
+      new Promise<void>((res) => setTimeout(res, 30_000)),
+    ]);
+
+    if (gatewaySpec) {
+      logger.info('[STARTUP] Internal microservices ready. Launching public Gateway...');
+      const manager = new ChildManager({
+        spec: gatewaySpec,
+        env: gatewayEnv,
         onReady: (name) => logger.info(`[STARTUP] ${name} service initialized`),
         onStateChange: () => this.pushStatusToGateway(),
         onMessage: (pid, message) => this.handleGatewayRequest(pid, message),
