@@ -16,12 +16,15 @@ export class ConsentRepository {
 
   public async createConsent(data: CreateConsentData, tx?: Prisma.TransactionClient): Promise<ConsentRecord> {
     const db = tx || this.prisma;
+    const rawIp = typeof data.ipAddress === 'string' ? (data.ipAddress.split(',')[0]?.trim() || '0.0.0.0') : '0.0.0.0';
+    const ipAddress = rawIp.substring(0, 45) || '0.0.0.0';
+
     return db.consentRecord.create({
       data: {
         userId: data.userId,
         consentType: data.consentType,
         accepted: data.accepted,
-        ipAddress: data.ipAddress,
+        ipAddress,
         privacyPolicyVersion: data.privacyPolicyVersion || 'v1.0',
       },
     });

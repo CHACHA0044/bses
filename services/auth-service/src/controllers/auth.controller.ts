@@ -1,5 +1,5 @@
 import type { Request, Response, NextFunction } from 'express';
-import { sendSuccess, sendCreated, JWT, createLogger } from '@bses/shared';
+import { sendSuccess, sendCreated, JWT, createLogger, extractClientIp } from '@bses/shared';
 import { authenticationService } from '../services/authentication.service';
 import { captchaService } from '../services/captcha.service';
 import {
@@ -73,7 +73,7 @@ export class AuthController {
       // Log the attempt at the very top of the request handler — this fires
       // even if validation/Database calls fail or hang, so the operator can
       // see in Render that a registration request was received.
-      const ipAddress = (req.headers['x-forwarded-for'] as string) || req.ip || '0.0.0.0';
+      const ipAddress = extractClientIp(req);
       logger.info(
         `[REGISTER_ATTEMPT] timestamp=${new Date().toISOString()} ` +
           `requestId=${(req as { correlationId?: string }).correlationId || 'n/a'} ` +
@@ -83,7 +83,6 @@ export class AuthController {
       );
 
       const validated = registerSchema.parse(req.body);
-      const ipAddressFinal = (req.headers['x-forwarded-for'] as string) || req.ip || '0.0.0.0';
 
       const result = await authenticationService.register({
         ...validated,
@@ -91,7 +90,7 @@ export class AuthController {
         aadhaar: validated.aadhaar ?? null,
         caNumber: validated.caNumber ?? null,
         meterNumber: validated.meterNumber ?? null,
-        ipAddress: ipAddressFinal,
+        ipAddress,
       });
       this.setCookies(res, result.tokens.accessToken, result.tokens.refreshToken);
 
@@ -111,7 +110,7 @@ export class AuthController {
       // database call. This guarantees Render shows the attempt timestamp,
       // correlation ID, redacted identifier, and IP, even if the service
       // hangs or crashes further down the stack.
-      const ipAddress = (req.headers['x-forwarded-for'] as string) || req.ip || '0.0.0.0';
+      const ipAddress = extractClientIp(req);
       logger.info(
         `[LOGIN_ATTEMPT] timestamp=${new Date().toISOString()} ` +
           `requestId=${(req as { correlationId?: string }).correlationId || 'n/a'} ` +
@@ -121,9 +120,8 @@ export class AuthController {
       );
 
       const validated = loginSchema.parse(req.body);
-      const ipAddressFinal = (req.headers['x-forwarded-for'] as string) || req.ip || '0.0.0.0';
 
-      const result = await authenticationService.login({ ...validated, ipAddress: ipAddressFinal });
+      const result = await authenticationService.login({ ...validated, ipAddress });
       this.setCookies(
         res,
         result.tokens.accessToken,
@@ -158,7 +156,7 @@ export class AuthController {
     try {
       const userId = req.user?.sub || 'anonymous';
       const rawRefreshToken = req.cookies[JWT.REFRESH_TOKEN_COOKIE];
-      const ipAddress = (req.headers['x-forwarded-for'] as string) || req.ip || '0.0.0.0';
+      const ipAddress = extractClientIp(req);
 
       await authenticationService.logout(userId, rawRefreshToken, ipAddress);
       this.clearCookies(res);
@@ -177,7 +175,7 @@ export class AuthController {
   ): Promise<void> => {
     try {
       const { email } = forgotPasswordSchema.parse(req.body);
-      const ipAddress = (req.headers['x-forwarded-for'] as string) || req.ip || '0.0.0.0';
+      const ipAddress = extractClientIp(req);
 
       await authenticationService.forgotPassword(email, ipAddress);
       sendSuccess(
@@ -196,7 +194,7 @@ export class AuthController {
       if (password !== confirmPassword) {
         throw new Error('Password confirmation does not match');
       }
-      const ipAddress = (req.headers['x-forwarded-for'] as string) || req.ip || '0.0.0.0';
+      const ipAddress = extractClientIp(req);
 
       await authenticationService.resetPassword(token, password, ipAddress);
       this.clearCookies(res);
@@ -220,7 +218,7 @@ export class AuthController {
         throw new Error('Password confirmation does not match');
       }
       const userId = req.user!.sub;
-      const ipAddress = (req.headers['x-forwarded-for'] as string) || req.ip || '0.0.0.0';
+      const ipAddress = extractClientIp(req);
 
       await authenticationService.changePassword(userId, currentPassword, newPassword, ipAddress);
       sendSuccess(res, null, 'Password updated successfully');

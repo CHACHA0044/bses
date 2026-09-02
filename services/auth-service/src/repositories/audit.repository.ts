@@ -15,13 +15,18 @@ export class AuditRepository {
   }
 
   public async createAuditLog(data: CreateAuditLogData): Promise<AuditLog> {
+    const rawIp = typeof data.ipAddress === 'string' ? (data.ipAddress.split(',')[0]?.trim() || '0.0.0.0') : '0.0.0.0';
+    const ipAddress = rawIp.substring(0, 45) || '0.0.0.0';
+    const performedBy = (data.performedBy || 'system').substring(0, 100);
+    const moduleName = (data.module || 'AUTH').substring(0, 50);
+
     return this.prisma.auditLog.create({
       data: {
         userId: data.userId || null,
-        performedBy: data.performedBy,
+        performedBy,
         action: data.action,
-        module: data.module,
-        ipAddress: data.ipAddress,
+        module: moduleName,
+        ipAddress,
       },
     });
   }
