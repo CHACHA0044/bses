@@ -145,7 +145,7 @@ export class AuthenticationService {
         tx,
       );
 
-      await consentService.recordRegistrationConsent(newUser.id, dto.ipAddress);
+      await consentService.recordRegistrationConsent(newUser.id, dto.ipAddress, tx);
       return newUser;
     });
 
