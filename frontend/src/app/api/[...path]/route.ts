@@ -230,7 +230,19 @@ async function proxy(
   const contentDisposition = upstreamRes.headers.get('content-disposition');
   if (contentDisposition) responseHeaders.set('Content-Disposition', contentDisposition);
 
-  const response = new NextResponse(upstreamRes.body, {
+  // Buffer non-streaming text/JSON responses so Next.js response.cookies.set
+  // modifies headers on a standard NextResponse instead of a Web ReadableStream.
+  const ctLower = (contentType ?? '').toLowerCase();
+  const isStreaming =
+    ctLower.includes('octet-stream') ||
+    ctLower.includes('image/') ||
+    ctLower.includes('video/') ||
+    ctLower.includes('pdf') ||
+    ctLower.includes('multipart/');
+
+  const resBody = isStreaming ? upstreamRes.body : await upstreamRes.text();
+
+  const response = new NextResponse(resBody, {
     status: upstreamRes.status,
     statusText: upstreamRes.statusText,
     headers: responseHeaders,
