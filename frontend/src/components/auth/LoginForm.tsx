@@ -50,18 +50,51 @@ export const LoginForm: React.FC = () => {
 
   const onSubmit = async (data: FormData) => {
     setServerAlert(null);
+    // [LOGIN_FLOW] — surface every step in the browser console so we can
+    // trace exactly where a stuck or failed login is happening from
+    // remote debugging alone (no SSH into Render required).
+    // eslint-disable-next-line no-console
+    console.log('[LOGIN_FLOW] step=submit identifier=', data.identifier, 'rememberMe=', !!data.rememberMe, 't=', new Date().toISOString());
     try {
       // Hard timeout: the button can never be stuck on "Loading…" forever.
+      // [LOGIN_FLOW] step=posting
+      // eslint-disable-next-line no-console
+      console.log('[LOGIN_FLOW] step=posting url=/auth/login timeout=8000ms t=', new Date().toISOString());
       const res = await apiClient.post('/auth/login', data, { timeout: 8000 });
+      // [LOGIN_FLOW] step=response-received
+      // eslint-disable-next-line no-console
+      console.log('[LOGIN_FLOW] step=response-received success=', res.data?.success, 'hasUser=', !!res.data?.data?.user, 'role=', res.data?.data?.user?.role, 't=', new Date().toISOString());
       if (res.data.success) {
         setIsRedirecting(true);
         setUser(res.data.data.user);
         const role = res.data.data.user.role;
         const dest = getSafeReturnPath() ?? roleDashboard(role);
+        // [LOGIN_FLOW] step=redirecting
+        // eslint-disable-next-line no-console
+        console.log('[LOGIN_FLOW] step=redirecting dest=', dest, 'role=', role, 't=', new Date().toISOString());
         warmPostLogin(role);
         router.replace(dest);
+        // [LOGIN_FLOW] step=router.replace-called
+        // eslint-disable-next-line no-console
+        console.log('[LOGIN_FLOW] step=router.replace-called (does not resolve until page changes)');
+      } else {
+        // eslint-disable-next-line no-console
+        console.warn('[LOGIN_FLOW] step=response-no-success payload=', res.data);
+        setServerAlert({ type: 'error', message: 'Unexpected response from server.' });
       }
     } catch (err: any) {
+      // [LOGIN_FLOW] step=error
+      // eslint-disable-next-line no-console
+      console.error('[LOGIN_FLOW] step=error', {
+        message: err?.message,
+        code: err?.code,
+        status: err?.response?.status,
+        statusText: err?.response?.statusText,
+        responseData: err?.response?.data,
+        isAxiosError: err?.isAxiosError,
+        isTimeout: err?.code === 'ECONNABORTED',
+        t: new Date().toISOString(),
+      });
       setServerAlert(classifyError(err));
     }
   };

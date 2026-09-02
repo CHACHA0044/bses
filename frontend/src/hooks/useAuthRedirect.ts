@@ -32,8 +32,17 @@ export const useAuthRedirect = (fallbackHref?: string) => {
   useEffect(() => {
     if (isLoading || !isAuthenticated) return;
     const dest = getSafeReturnPath() ?? fallbackHref ?? roleDashboard(user?.role);
+    // [AUTH_REDIRECT] trace so we can see in the browser console which path
+    // the auth pages send us to and whether middleware later accepts it.
+    // eslint-disable-next-line no-console
+    console.log('[AUTH_REDIRECT] step=redirecting isAuthenticated=', isAuthenticated, 'role=', user?.role, 'dest=', dest, 'fallbackHref=', fallbackHref, 't=', new Date().toISOString());
     router.replace(dest);
   }, [isLoading, isAuthenticated, user, router, fallbackHref]);
+
+  useEffect(() => {
+    // eslint-disable-next-line no-console
+    console.log('[AUTH_REDIRECT] step=state isLoading=', isLoading, 'isAuthenticated=', isAuthenticated, 'role=', user?.role, 't=', new Date().toISOString());
+  }, [isLoading, isAuthenticated, user]);
 
   // Fail-safe: if the session check hangs (network unreachable, gateway 5xx,
   // store regression) the auth route would otherwise sit on the

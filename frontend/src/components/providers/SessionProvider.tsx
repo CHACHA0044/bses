@@ -31,11 +31,15 @@ export const SessionProvider: React.FC<{
 
   useEffect(() => {
     if (initialSession?.status === 'authenticated') {
+      // eslint-disable-next-line no-console
+      console.log('[SESSION_PROVIDER] step=seed-from-server user=', initialSession.user?.username, 'role=', initialSession.user?.role, 't=', new Date().toISOString());
       setUser(initialSession.user);
       warmPostLogin(initialSession.user.role);
       return;
     }
     if (initialSession?.status === 'unauthenticated') {
+      // eslint-disable-next-line no-console
+      console.log('[SESSION_PROVIDER] step=seed-unauthenticated t=', new Date().toISOString());
       setUser(null);
       return;
     }
@@ -44,8 +48,19 @@ export const SessionProvider: React.FC<{
     // service. Restoring in an effect keeps SSR and the first client render
     // identical (both show the loading state), avoiding hydration mismatches.
     const cached = getInitialUser();
+    // eslint-disable-next-line no-console
+    console.log('[SESSION_PROVIDER] step=unknown cached=', cached ? cached.username : null, 't=', new Date().toISOString());
     if (cached) setUser(cached);
-    checkSession();
+    checkSession().then(
+      () => {
+        // eslint-disable-next-line no-console
+        console.log('[SESSION_PROVIDER] step=checkSession-resolved t=', new Date().toISOString());
+      },
+      (err) => {
+        // eslint-disable-next-line no-console
+        console.warn('[SESSION_PROVIDER] step=checkSession-rejected', err?.message, 't=', new Date().toISOString());
+      },
+    );
   }, [initialSession, checkSession, setUser]);
 
   return <>{children}</>;

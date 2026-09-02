@@ -233,16 +233,47 @@ export default function RegisterPage() {
 
   const onSubmit = async (data: FormData) => {
     setServerError(null);
+    // [REGISTER_FLOW] — surface every step in the browser console so we can
+    // trace exactly where a stuck or failed registration is happening from
+    // remote debugging alone (no SSH into Render required).
+    // eslint-disable-next-line no-console
+    console.log('[REGISTER_FLOW] step=submit step=', currentStep, 'username=', data.username, 'email=', data.email, 't=', new Date().toISOString());
     try {
+      // [REGISTER_FLOW] step=posting
+      // eslint-disable-next-line no-console
+      console.log('[REGISTER_FLOW] step=posting url=/auth/register timeout=8000ms t=', new Date().toISOString());
       const res = await apiClient.post('/auth/register', data, { timeout: 8000 });
+      // [REGISTER_FLOW] step=response-received
+      // eslint-disable-next-line no-console
+      console.log('[REGISTER_FLOW] step=response-received success=', res.data?.success, 'hasUser=', !!res.data?.data?.user, 'role=', res.data?.data?.user?.role, 't=', new Date().toISOString());
       if (res.data.success) {
         setIsRedirecting(true);
         setUser(res.data.data.user);
         warmPostLogin(res.data.data.user.role);
         setSuccess(true);
+        // [REGISTER_FLOW] step=redirecting
+        // eslint-disable-next-line no-console
+        console.log('[REGISTER_FLOW] step=redirecting dest=/dashboard t=', new Date().toISOString());
         router.replace('/dashboard');
+      } else {
+        // eslint-disable-next-line no-console
+        console.warn('[REGISTER_FLOW] step=response-no-success payload=', res.data);
+        setServerError('Unexpected response from server.');
+        fetchCaptcha();
       }
     } catch (err: any) {
+      // [REGISTER_FLOW] step=error
+      // eslint-disable-next-line no-console
+      console.error('[REGISTER_FLOW] step=error', {
+        message: err?.message,
+        code: err?.code,
+        status: err?.response?.status,
+        statusText: err?.response?.statusText,
+        responseData: err?.response?.data,
+        isAxiosError: err?.isAxiosError,
+        isTimeout: err?.code === 'ECONNABORTED',
+        t: new Date().toISOString(),
+      });
       setServerError(
         err?.response?.data?.error?.message || 'Registration failed. Please try again.',
       );
