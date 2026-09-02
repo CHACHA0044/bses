@@ -179,9 +179,14 @@ async function proxy(
   if (method !== 'GET' && method !== 'HEAD') {
     const ct = req.headers.get('content-type') ?? '';
     if (ct) {
-      body = req.body as unknown as BodyInit;
       if (!upstreamHeaders.has('content-type')) {
         upstreamHeaders.set('content-type', ct);
+      }
+      if (ct.toLowerCase().includes('multipart/form-data')) {
+        body = await req.arrayBuffer();
+      } else {
+        const text = await req.text();
+        if (text) body = text;
       }
     }
   }
