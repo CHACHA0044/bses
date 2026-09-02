@@ -7,11 +7,21 @@ export class TokenService {
   /**
    * Generates JWT Access Token (15 minutes expiry)
    */
-  public generateAccessToken(payload: { userId: string; username: string; role: UserRole }): string {
+  public generateAccessToken(payload: {
+    userId: string;
+    username: string;
+    role: UserRole;
+    firstName?: string | undefined;
+    lastName?: string | undefined;
+    email?: string | undefined;
+  }): string {
     const accessPayload: JwtAccessPayload = {
       sub: payload.userId,
       username: payload.username,
       role: payload.role,
+      firstName: payload.firstName,
+      lastName: payload.lastName,
+      email: payload.email,
     };
 
     const options: SignOptions = {

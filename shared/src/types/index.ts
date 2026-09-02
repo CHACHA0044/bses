@@ -102,6 +102,9 @@ export interface JwtAccessPayload {
   sub: string;
   username: string;
   role: UserRole;
+  firstName?: string | undefined;
+  lastName?: string | undefined;
+  email?: string | undefined;
   iat?: number;
   exp?: number;
 }

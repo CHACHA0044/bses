@@ -154,6 +154,9 @@ export class AuthenticationService {
       userId: user.id,
       username: user.username,
       role: user.role as any,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      email: user.email,
     });
     const refreshToken = tokenService.generateRefreshToken(user.id);
     const refreshTokenHash = tokenService.hashToken(refreshToken);
@@ -209,10 +212,17 @@ export class AuthenticationService {
         throw new AuthenticationError('Invalid credentials');
       }
 
+      const parts = (admin.name || '').trim().split(/\s+/);
+      const adminFirstName = parts.shift() || admin.email;
+      const adminLastName = parts.join(' ') || '';
+
       const accessToken = tokenService.generateAccessToken({
         userId: admin.id,
         username: admin.email,
         role: admin.role as any,
+        firstName: adminFirstName,
+        lastName: adminLastName,
+        email: admin.email,
       });
       const refreshToken = tokenService.generateRefreshToken(admin.id);
       const refreshTokenHash = tokenService.hashToken(refreshToken);
@@ -278,6 +288,9 @@ export class AuthenticationService {
       userId: user.id,
       username: user.username,
       role: user.role as any,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      email: user.email,
     });
     const refreshToken = tokenService.generateRefreshToken(user.id);
     const refreshTokenHash = tokenService.hashToken(refreshToken);
@@ -329,10 +342,17 @@ export class AuthenticationService {
         throw new AuthenticationError('Admin associated with refresh token no longer exists');
       }
 
+      const parts = (admin.name || '').trim().split(/\s+/);
+      const adminFirstName = parts.shift() || admin.email;
+      const adminLastName = parts.join(' ') || '';
+
       const newAccessToken = tokenService.generateAccessToken({
         userId: admin.id,
         username: admin.email,
         role: admin.role as any,
+        firstName: adminFirstName,
+        lastName: adminLastName,
+        email: admin.email,
       });
       const newRefreshToken = tokenService.generateRefreshToken(admin.id);
       const newRefreshTokenHash = tokenService.hashToken(newRefreshToken);
@@ -360,6 +380,9 @@ export class AuthenticationService {
       userId: user.id,
       username: user.username,
       role: user.role as any,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      email: user.email,
     });
     const newRefreshToken = tokenService.generateRefreshToken(user.id);
     const newRefreshTokenHash = tokenService.hashToken(newRefreshToken);

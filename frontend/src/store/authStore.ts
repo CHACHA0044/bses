@@ -67,27 +67,28 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   setCachedUser: (user) => {
-    // Optimistically set user for UI (e.g. Navbar branding), but keep isLoading: true
-    // so route guards wait for backend checkSession() verification.
-    set({ user, isAuthenticated: !!user, isLoading: true, error: null });
+    // Optimistically store user for UI hydration, but keep isAuthenticated: false and isLoading: true
+    // so Navbar shows loading state and route guards wait for backend checkSession() verification.
+    set({ user, isAuthenticated: false, isLoading: true, error: null });
   },
 
   checkSession: async (silent = false) => {
-    // If silent (or user already cached), do NOT flip isLoading to true
     if (!silent && !get().user) {
       set({ isLoading: true });
     }
     try {
       const res = await apiClient.get('/auth/session', { timeout: 4000 });
-      if (res.data.success && res.data.data.authenticated) {
+      if (res.data?.success && res.data?.data?.authenticated && res.data?.data?.user) {
         get().setUser(res.data.data.user);
       } else {
         get().setUser(null);
       }
-    } catch {
-      // Keep existing cached state on transient network error, or clear if unauthenticated
-      if (!get().user) {
+    } catch (err: any) {
+      const status = err?.response?.status;
+      if (status === 401 || status === 403 || !err?.response) {
         get().setUser(null);
+      } else {
+        set({ isLoading: false });
       }
     }
   },
