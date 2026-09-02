@@ -167,16 +167,23 @@ async function proxy(
   // Build the response, copying status + body + the headers we need.
   const responseHeaders = new Headers(buildCorsHeaders(origin));
 
-  // Forward Set-Cookie verbatim so the browser stores it on the Vercel
+  // Forward Set-Cookie headers so the browser stores them on the Vercel
   // origin (where subsequent middleware checks happen).
-  const setCookie = upstreamRes.headers.get('set-cookie');
-  if (setCookie) {
-    // Upstream may send multiple Set-Cookie headers combined into one
-    // comma-separated string by the fetch API. Set them individually so
-    // the browser treats each as a distinct cookie.
-    for (const cookie of setCookie.split(/,(?=[^;]+=[^;]+)/)) {
-      responseHeaders.append('Set-Cookie', cookie.trim());
-    }
+  // Strip any explicit `Domain=` attribute so cookies are saved as host-only cookies
+  // for the current Vercel frontend host, avoiding cross-domain rejection.
+  const rawSetCookies =
+    typeof (upstreamRes.headers as any).getSetCookie === 'function'
+      ? (upstreamRes.headers as any).getSetCookie()
+      : (() => {
+          const setCookie = upstreamRes.headers.get('set-cookie');
+          return setCookie ? setCookie.split(/,(?=[^;]+=[^;]+)/) : [];
+        })();
+
+  for (const cookieStr of rawSetCookies) {
+    if (!cookieStr || !cookieStr.trim()) continue;
+    // Remove Domain=... directive to keep cookie host-only
+    const cleanedCookie = cookieStr.replace(/;\s*Domain=[^;]*/gi, '');
+    responseHeaders.append('Set-Cookie', cleanedCookie.trim());
   }
 
   // Forward a couple of useful response headers.

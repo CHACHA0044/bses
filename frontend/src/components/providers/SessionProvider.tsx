@@ -28,6 +28,7 @@ export const SessionProvider: React.FC<{
 }> = ({ children, initialSession }) => {
   const checkSession = useAuthStore((s) => s.checkSession);
   const setUser = useAuthStore((s) => s.setUser);
+  const setCachedUser = useAuthStore((s) => s.setCachedUser);
 
   useEffect(() => {
     if (initialSession?.status === 'authenticated') {
@@ -45,12 +46,12 @@ export const SessionProvider: React.FC<{
     }
     // Unknown session (or no prop) — restore any locally cached session first
     // (fast path, so the nav never flashes), then verify it against the auth
-    // service. Restoring in an effect keeps SSR and the first client render
-    // identical (both show the loading state), avoiding hydration mismatches.
+    // service. Restoring with setCachedUser keeps isLoading=true so route guards
+    // wait for checkSession() before attempting navigation.
     const cached = getInitialUser();
     // eslint-disable-next-line no-console
     console.log('[SESSION_PROVIDER] step=unknown cached=', cached ? cached.username : null, 't=', new Date().toISOString());
-    if (cached) setUser(cached);
+    if (cached) setCachedUser(cached);
     checkSession().then(
       () => {
         // eslint-disable-next-line no-console
@@ -61,7 +62,7 @@ export const SessionProvider: React.FC<{
         console.warn('[SESSION_PROVIDER] step=checkSession-rejected', err?.message, 't=', new Date().toISOString());
       },
     );
-  }, [initialSession, checkSession, setUser]);
+  }, [initialSession, checkSession, setUser, setCachedUser]);
 
   return <>{children}</>;
 };

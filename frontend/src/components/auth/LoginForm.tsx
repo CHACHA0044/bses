@@ -73,16 +73,20 @@ export const LoginForm: React.FC = () => {
         // eslint-disable-next-line no-console
         console.log('[LOGIN_FLOW] step=redirecting dest=', dest, 'role=', role, 't=', new Date().toISOString());
         warmPostLogin(role);
-        router.replace(dest);
-        // [LOGIN_FLOW] step=router.replace-called
-        // eslint-disable-next-line no-console
-        console.log('[LOGIN_FLOW] step=router.replace-called (does not resolve until page changes)');
+        // Use full page document location assign to ensure HTTP-only cookies are fully committed
+        // in browser cookie store before Next.js middleware evaluates the destination route.
+        if (typeof window !== 'undefined') {
+          window.location.assign(dest);
+        } else {
+          router.replace(dest);
+        }
       } else {
         // eslint-disable-next-line no-console
         console.warn('[LOGIN_FLOW] step=response-no-success payload=', res.data);
         setServerAlert({ type: 'error', message: 'Unexpected response from server.' });
       }
     } catch (err: any) {
+      setIsRedirecting(false);
       // [LOGIN_FLOW] step=error
       // eslint-disable-next-line no-console
       console.error('[LOGIN_FLOW] step=error', {

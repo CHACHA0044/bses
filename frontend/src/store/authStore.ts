@@ -23,6 +23,7 @@ interface AuthState {
   isLoading: boolean;
   error: string | null;
   setUser: (user: UserProfile | null) => void;
+  setCachedUser: (user: UserProfile | null) => void;
   checkSession: (silent?: boolean) => Promise<void>;
   logout: (router?: { push: (href: string) => void }) => Promise<void>;
 }
@@ -63,6 +64,12 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       }
     }
     set({ user, isAuthenticated: !!user, isLoading: false, error: null });
+  },
+
+  setCachedUser: (user) => {
+    // Optimistically set user for UI (e.g. Navbar branding), but keep isLoading: true
+    // so route guards wait for backend checkSession() verification.
+    set({ user, isAuthenticated: !!user, isLoading: true, error: null });
   },
 
   checkSession: async (silent = false) => {

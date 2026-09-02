@@ -42,6 +42,7 @@ export class AuthController {
       httpOnly: true,
       secure: isProduction || sameSite === 'none',
       sameSite,
+      path: '/',
       maxAge: 15 * 60 * 1000, // 15 minutes
     });
 
@@ -49,6 +50,7 @@ export class AuthController {
       httpOnly: true,
       secure: isProduction || sameSite === 'none',
       sameSite,
+      path: '/',
       maxAge: (rememberMe ? 30 : 7) * 24 * 60 * 60 * 1000, // 7 or 30 days
     });
   }
@@ -60,6 +62,7 @@ export class AuthController {
       httpOnly: true,
       secure: isProduction || sameSite === 'none',
       sameSite,
+      path: '/',
     };
     res.clearCookie(JWT.ACCESS_TOKEN_COOKIE, commonOpts);
     res.clearCookie(JWT.REFRESH_TOKEN_COOKIE, commonOpts);

@@ -36,7 +36,11 @@ export const useAuthRedirect = (fallbackHref?: string) => {
     // the auth pages send us to and whether middleware later accepts it.
     // eslint-disable-next-line no-console
     console.log('[AUTH_REDIRECT] step=redirecting isAuthenticated=', isAuthenticated, 'role=', user?.role, 'dest=', dest, 'fallbackHref=', fallbackHref, 't=', new Date().toISOString());
-    router.replace(dest);
+    if (typeof window !== 'undefined') {
+      window.location.replace(dest);
+    } else {
+      router.replace(dest);
+    }
   }, [isLoading, isAuthenticated, user, router, fallbackHref]);
 
   useEffect(() => {
