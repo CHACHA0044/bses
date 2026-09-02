@@ -29,6 +29,17 @@ export const apiClient = axios.create({
 // Set Content-Type: application/json only when sending body data (POST/PUT/PATCH),
 // preventing unexpected CORS preflight checks or header mismatches on GET/blob requests.
 apiClient.interceptors.request.use((config) => {
+  if (typeof window !== 'undefined') {
+    config.baseURL = '/api';
+    if (config.url && config.url.startsWith('http')) {
+      try {
+        const u = new URL(config.url);
+        config.url = u.pathname.replace(/^\/api/, '');
+      } catch {
+        /* ignore invalid URL */
+      }
+    }
+  }
   if (config.data && !(config.data instanceof FormData) && !config.headers['Content-Type']) {
     config.headers['Content-Type'] = 'application/json';
   }
