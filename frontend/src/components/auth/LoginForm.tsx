@@ -56,11 +56,11 @@ export const LoginForm: React.FC = () => {
     // eslint-disable-next-line no-console
     console.log('[LOGIN_FLOW] step=submit identifier=', data.identifier, 'rememberMe=', !!data.rememberMe, 't=', new Date().toISOString());
     try {
-      // Hard timeout: the button can never be stuck on "Loading…" forever.
+      // Hard timeout: tolerate Render free-tier cold starts (~25-30s).
       // [LOGIN_FLOW] step=posting
       // eslint-disable-next-line no-console
-      console.log('[LOGIN_FLOW] step=posting url=/auth/login timeout=8000ms t=', new Date().toISOString());
-      const res = await apiClient.post('/auth/login', data, { timeout: 8000 });
+      console.log('[LOGIN_FLOW] step=posting url=/auth/login timeout=35000ms t=', new Date().toISOString());
+      const res = await apiClient.post('/auth/login', data, { timeout: 35000 });
       // [LOGIN_FLOW] step=response-received
       // eslint-disable-next-line no-console
       console.log('[LOGIN_FLOW] step=response-received success=', res.data?.success, 'hasUser=', !!res.data?.data?.user, 'role=', res.data?.data?.user?.role, 't=', new Date().toISOString());

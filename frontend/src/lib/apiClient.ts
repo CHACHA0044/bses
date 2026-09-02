@@ -23,7 +23,7 @@ import axios from 'axios';
 export const apiClient = axios.create({
   baseURL: '/api',
   withCredentials: true, // Send HTTP-Only cookies (now same-origin)
-  timeout: 10_000, // No request may hang indefinitely — reject after 10s
+  timeout: 35_000, // Tolerate Render free-tier cold starts (~25-30s)
 });
 
 // Set Content-Type: application/json only when sending body data (POST/PUT/PATCH),
