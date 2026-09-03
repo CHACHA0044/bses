@@ -76,20 +76,41 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     if (!silent && !get().user) {
       set({ isLoading: true });
     }
-    try {
-      const res = await apiClient.get('/auth/session', { timeout: 4000 });
-      if (res.data?.success && res.data?.data?.authenticated && res.data?.data?.user) {
-        get().setUser(res.data.data.user);
-      } else {
-        get().setUser(null);
+    // Hard upper bound: if the axios timeout doesn't fire (network hang,
+    // gateway cold-start that doesn't kill the socket, etc.) we still need
+    // to resolve isLoading so the AuthGuard/Navbar unblock. 8s mirrors the
+    // fail-safes in AuthGuard / useAuthRedirect.
+    const failSafe = new Promise<void>((resolve) =>
+      setTimeout(() => resolve(), 8000),
+    );
+    const probe = (async () => {
+      try {
+        const res = await apiClient.get('/auth/session', { timeout: 5000 });
+        if (res.data?.success && res.data?.data?.authenticated && res.data?.data?.user) {
+          get().setUser(res.data.data.user);
+        } else {
+          get().setUser(null);
+        }
+      } catch (err: any) {
+        const status = err?.response?.status;
+        // 401 / 403 / no-response → no valid session, clear user.
+        // Anything else (5xx, hang, gateway outage) → keep cached user (if any)
+        // so the UI doesn't flash logged-out, but always force isLoading=false.
+        if (status === 401 || status === 403 || !err?.response) {
+          get().setUser(null);
+        } else {
+          // 5xx / network-with-response → trust cached sessionStorage user, stop loading.
+          const cached = get().user ?? getInitialUser();
+          set({ user: cached, isAuthenticated: !!cached, isLoading: false });
+        }
       }
-    } catch (err: any) {
-      const status = err?.response?.status;
-      if (status === 401 || status === 403 || !err?.response) {
-        get().setUser(null);
-      } else {
-        set({ isLoading: false });
-      }
+    })();
+    await Promise.race([probe, failSafe]);
+    // Guarantee isLoading is resolved even if `probe` is still pending in the
+    // background — the background call will eventually settle and update the
+    // user, but the UI must never sit on a spinner forever.
+    if (get().isLoading) {
+      set({ isLoading: false });
     }
   },
 

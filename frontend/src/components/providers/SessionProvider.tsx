@@ -29,6 +29,7 @@ export const SessionProvider: React.FC<{
   const checkSession = useAuthStore((s) => s.checkSession);
   const setUser = useAuthStore((s) => s.setUser);
   const setCachedUser = useAuthStore((s) => s.setCachedUser);
+  const isLoading = useAuthStore((s) => s.isLoading);
 
   useEffect(() => {
     if (initialSession?.status === 'authenticated') {
@@ -52,6 +53,9 @@ export const SessionProvider: React.FC<{
     // eslint-disable-next-line no-console
     console.log('[SESSION_PROVIDER] step=unknown cached=', cached ? cached.username : null, 't=', new Date().toISOString());
     if (cached) setCachedUser(cached);
+
+    // checkSession() now has its own internal 8s fail-safe, so we don't need
+    // a separate timeout here. Just attach logging to the promise.
     checkSession().then(
       () => {
         // eslint-disable-next-line no-console
@@ -62,7 +66,26 @@ export const SessionProvider: React.FC<{
         console.warn('[SESSION_PROVIDER] step=checkSession-rejected', err?.message, 't=', new Date().toISOString());
       },
     );
-  }, [initialSession, checkSession, setUser, setCachedUser]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialSession]);
+
+  // Defensive fail-safe: if isLoading somehow stays true for >12s (shouldn't
+  // happen with checkSession's own 8s bound, but belt-and-suspenders), force
+  // resolve so the UI is never permanently stuck.
+  useEffect(() => {
+    if (!isLoading) return;
+    const timer = setTimeout(() => {
+      const { user } = useAuthStore.getState();
+      if (user) {
+        // We have a cached user — trust it, resolve loading.
+        setUser(user);
+      }
+      // If no cached user either, just drop isLoading so the auth pages
+      // render the login form instead of a spinner.
+      useAuthStore.setState((s) => ({ isLoading: false, user: s.user }));
+    }, 12000);
+    return () => clearTimeout(timer);
+  }, [isLoading, setUser]);
 
   return <>{children}</>;
 };
