@@ -192,7 +192,8 @@ async function proxy(
       lower === 'host' ||
       lower === 'origin' ||
       lower === 'content-length' ||
-      lower === 'connection'
+      lower === 'connection' ||
+      lower === 'accept-encoding'
     ) {
       continue;
     }
@@ -204,6 +205,12 @@ async function proxy(
   } catch {
     /* ignore */
   }
+  // Force identity encoding so the upstream returns plain JSON text. If the
+  // upstream replies with gzip/br the body arrives as a binary blob and
+  // axios's default JSON parser can't deserialize it (this was the cause of
+  // the "success=undefined" console trace: the body was correct JSON in the
+  // response, but axios was reading compressed bytes).
+  upstreamHeaders.set('Accept-Encoding', 'identity');
 
   // Read body for non-GET/HEAD methods.
   let body: BodyInit | undefined;
