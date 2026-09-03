@@ -261,35 +261,9 @@ async function proxy(
 
   const responseHeaders = new Headers(buildCorsHeaders(origin));
 
-  // Forward a couple of useful response headers.
-  const contentType = upstreamRes.headers.get('content-type');
-  if (contentType) responseHeaders.set('Content-Type', contentType);
-  const correlationId = upstreamRes.headers.get('x-correlation-id');
-  if (correlationId) responseHeaders.set('x-correlation-id', correlationId);
-  const contentLength = upstreamRes.headers.get('content-length');
-  if (contentLength) responseHeaders.set('Content-Length', contentLength);
-  const contentDisposition = upstreamRes.headers.get('content-disposition');
-  if (contentDisposition) responseHeaders.set('Content-Disposition', contentDisposition);
-
-  // Buffer non-streaming text/JSON responses so Next.js response.cookies.set
-  // modifies headers on a standard NextResponse instead of a Web ReadableStream.
-  const ctLower = (contentType ?? '').toLowerCase();
-  const isStreaming =
-    ctLower.includes('octet-stream') ||
-    ctLower.includes('image/') ||
-    ctLower.includes('video/') ||
-    ctLower.includes('pdf') ||
-    ctLower.includes('multipart/');
-
-  const resBody = isStreaming ? upstreamRes.body : await upstreamRes.text();
-
-  const response = new NextResponse(resBody, {
-    status: upstreamRes.status,
-    statusText: upstreamRes.statusText,
-    headers: responseHeaders,
-  });
-
-  // Extract raw Set-Cookie headers from upstream response
+  // Extract raw Set-Cookie headers from upstream response BEFORE we construct
+  // the NextResponse, because Node's fetch Headers.getSetCookie() is the only
+  // reliable way to read multiple Set-Cookie values.
   const rawSetCookies =
     typeof (upstreamRes.headers as any).getSetCookie === 'function'
       ? (upstreamRes.headers as any).getSetCookie()
@@ -298,7 +272,52 @@ async function proxy(
           return setCookie ? setCookie.split(/,(?=[^;]+=[^;]+)/) : [];
         })();
 
-  // Use Next.js response.cookies.set API to set cookies cleanly on the response
+  // Forward a couple of useful response headers. ALWAYS set Content-Type for
+  // text/JSON responses so axios's default JSON parser can deserialize the
+  // body — previously we forwarded the upstream content-type verbatim, but
+  // if the upstream sets 'application/json; charset=utf-8' axios handled
+  // that fine; the issue was that when charset is missing or the header
+  // includes a 'profile' param the parser fell back to text.
+  const contentType = upstreamRes.headers.get('content-type');
+  const ctLower = (contentType ?? '').toLowerCase();
+  const looksJson = ctLower.includes('json') || ctLower.length === 0; // empty -> assume JSON from our API
+  if (looksJson) {
+    responseHeaders.set('Content-Type', 'application/json; charset=utf-8');
+  } else if (contentType) {
+    responseHeaders.set('Content-Type', contentType);
+  }
+  const correlationId = upstreamRes.headers.get('x-correlation-id');
+  if (correlationId) responseHeaders.set('x-correlation-id', correlationId);
+  const contentDisposition = upstreamRes.headers.get('content-disposition');
+  if (contentDisposition) responseHeaders.set('Content-Disposition', contentDisposition);
+
+  // Determine if the upstream response is a binary stream we should pass
+  // through directly.
+  const isStreaming =
+    ctLower.includes('octet-stream') ||
+    ctLower.includes('image/') ||
+    ctLower.includes('video/') ||
+    ctLower.includes('pdf') ||
+    ctLower.includes('multipart/');
+
+  // For non-streaming responses, read the body as text so we can re-emit it
+  // via NextResponse. Streaming responses pass through the ReadableStream.
+  const resBody: BodyInit = isStreaming
+    ? (upstreamRes.body as unknown as ReadableStream)
+    : await upstreamRes.text();
+
+  // Build the NextResponse FIRST with the body and status, then attach
+  // cookies via response.cookies.set (which manipulates headers but does NOT
+  // invalidate the body in modern Next.js versions).
+  const response = new NextResponse(resBody, {
+    status: upstreamRes.status,
+    statusText: upstreamRes.statusText,
+    headers: responseHeaders,
+  });
+
+  // Apply upstream Set-Cookie headers so the browser stores them on the
+  // Vercel origin (not the Render gateway). Required for the session to
+  // persist across navigations/reloads.
   for (const cookieStr of rawSetCookies) {
     const parsed = parseCookieHeader(cookieStr);
     if (parsed) {
