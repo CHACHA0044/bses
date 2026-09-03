@@ -65,18 +65,23 @@ let refreshPromise: Promise<unknown> | null = null;
  */
 function parseBodyIfString(body: unknown, depth = 0): unknown {
   if (typeof body !== 'string' || body.length === 0) return body;
-  if (depth > 5) return body; // sanity guard against pathological loops
+  if (depth > 8) return body; // sanity guard against pathological loops
   const trimmed = body.trim();
-  if (
-    trimmed.length === 0 ||
-    (!trimmed.startsWith('{') &&
-      !trimmed.startsWith('[') &&
-      !trimmed.startsWith('"'))
-  ) {
-    return body;
-  }
+  if (trimmed.length === 0) return body;
+
+  // Try to extract a JSON object/array from inside any wrapper (quotes,
+  // stray prefixes, BOM, etc.). We do a loose scan for the first '{' or '['
+  // and the matching closer so that wrappers like 'prefix{"success":...}'
+  // or '{...}\n' still parse correctly.
+  const firstBrace = trimmed.search(/[{[]/);
+  if (firstBrace < 0) return body;
+  const startChar = trimmed[firstBrace];
+  const endChar = startChar === '{' ? '}' : ']';
+  const lastClose = trimmed.lastIndexOf(endChar);
+  if (lastClose <= firstBrace) return body;
+  const candidate = trimmed.slice(firstBrace, lastClose + 1);
   try {
-    const parsed = JSON.parse(trimmed);
+    const parsed = JSON.parse(candidate);
     // If we just unwrapped a JSON-encoded string, recurse — defensive against
     // multi-layer JSON.stringify wrappers (proxy, logger, response interceptors).
     if (typeof parsed === 'string' && parsed.trim().length > 0) {
