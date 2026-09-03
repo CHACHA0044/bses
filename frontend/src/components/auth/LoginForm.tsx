@@ -106,7 +106,16 @@ export const LoginForm: React.FC = () => {
         }
       } else {
         // eslint-disable-next-line no-console
-        console.warn('[LOGIN_FLOW] step=response-no-success payload=', res.data);
+        console.warn('[LOGIN_FLOW] step=response-no-success', {
+          typeofData: typeof res.data,
+          isArray: Array.isArray(res.data),
+          keys: res.data && typeof res.data === 'object' ? Object.keys(res.data) : null,
+          stringPreview:
+            typeof res.data === 'string'
+              ? res.data.slice(0, 200)
+              : null,
+          full: res.data,
+        });
         setServerAlert({ type: 'error', message: 'Unexpected response from server.' });
       }
     } catch (err: any) {

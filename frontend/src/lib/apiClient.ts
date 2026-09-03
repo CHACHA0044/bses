@@ -57,15 +57,33 @@ let refreshPromise: Promise<unknown> | null = null;
 /**
  * Helper: axios should auto-parse JSON based on the response Content-Type,
  * but if Vercel's proxy/CDN mangles that header (drops the charset, sends
- * text/plain, sends gzipped bytes) the body comes back as a string. Parse
- * it manually so callers always see a real JS object.
+ * text/plain, sends gzipped bytes, or double-encodes the body) the data
+ * comes back as a string. Parse it manually so callers always see a real
+ * JS object — and unwrap *any number* of nested JSON encodings, which can
+ * happen when a logging/proxy layer does `JSON.stringify(body)` on an
+ * already-stringified payload.
  */
-function parseBodyIfString(body: unknown): unknown {
+function parseBodyIfString(body: unknown, depth = 0): unknown {
   if (typeof body !== 'string' || body.length === 0) return body;
+  if (depth > 5) return body; // sanity guard against pathological loops
   const trimmed = body.trim();
-  if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) return body;
+  if (
+    trimmed.length === 0 ||
+    (!trimmed.startsWith('{') &&
+      !trimmed.startsWith('[') &&
+      !trimmed.startsWith('"'))
+  ) {
+    return body;
+  }
   try {
-    return JSON.parse(trimmed);
+    const parsed = JSON.parse(trimmed);
+    // If we just unwrapped a JSON-encoded string, recurse — defensive against
+    // multi-layer JSON.stringify wrappers (proxy, logger, response interceptors).
+    if (typeof parsed === 'string' && parsed.trim().length > 0) {
+      const inner = parseBodyIfString(parsed, depth + 1);
+      if (inner !== parsed) return inner;
+    }
+    return parsed;
   } catch {
     return body;
   }
