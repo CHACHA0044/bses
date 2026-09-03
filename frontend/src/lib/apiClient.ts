@@ -54,9 +54,32 @@ apiClient.interceptors.request.use((config) => {
  */
 let refreshPromise: Promise<unknown> | null = null;
 
+/**
+ * Helper: axios should auto-parse JSON based on the response Content-Type,
+ * but if Vercel's proxy/CDN mangles that header (drops the charset, sends
+ * text/plain, sends gzipped bytes) the body comes back as a string. Parse
+ * it manually so callers always see a real JS object.
+ */
+function parseBodyIfString(body: unknown): unknown {
+  if (typeof body !== 'string' || body.length === 0) return body;
+  const trimmed = body.trim();
+  if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) return body;
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    return body;
+  }
+}
+
 apiClient.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    response.data = parseBodyIfString(response.data);
+    return response;
+  },
   async (error) => {
+    if (error?.response?.data) {
+      error.response.data = parseBodyIfString(error.response.data);
+    }
     const originalRequest = error.config;
 
     // Handle token refresh automatically if 401 occurs and request hasn't been retried
