@@ -94,6 +94,14 @@ function parseBodyIfString(body: unknown, depth = 0): unknown {
   }
 }
 
+// Build marker — bump this whenever the parser logic changes so we can see
+// in the browser console whether the latest deploy is actually live.
+const BUILD_MARKER = 'BSES_API_CLIENT_BUILD_2026-09-03_v3';
+if (typeof window !== 'undefined') {
+  // eslint-disable-next-line no-console
+  console.info('[BSES_API_CLIENT] build marker:', BUILD_MARKER);
+}
+
 apiClient.interceptors.response.use(
   (response) => {
     response.data = parseBodyIfString(response.data);
