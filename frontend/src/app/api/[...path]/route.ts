@@ -53,8 +53,36 @@ export const OPTIONS = (req: NextRequest, ctx: { params: { path: string[] } }) =
 
 function getUpstreamBase(): string {
   // Server-side only — never expose to the browser bundle.
+  //
+  // Order of precedence:
+  //   1. BACKEND_API_URL      — explicit override (preferred in production)
+  //   2. NEXT_PUBLIC_API_URL  — used by the browser bundle; also readable on the
+  //                             server at runtime in Next.js (it's a plain env
+  //                             var, only its name is public-prefix). Saves you
+  //                             from having to set a duplicate env var.
+  //   3. NEXT_PUBLIC_SITE_URL + '/api' — convenience for monorepos where the
+  //                                     site URL is already set.
+  //   4. http://localhost:3000/api — local dev fallback.
   const raw =
-    process.env.BACKEND_API_URL || process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000/api';
+    process.env.BACKEND_API_URL ||
+    process.env.NEXT_PUBLIC_API_URL ||
+    (process.env.NEXT_PUBLIC_SITE_URL
+      ? `${process.env.NEXT_PUBLIC_SITE_URL.replace(/\/+$/, '')}/api`
+      : null) ||
+    'http://localhost:3000/api';
+  if (!process.env.BACKEND_API_URL && !process.env.NEXT_PUBLIC_API_URL) {
+    // Surface this in the Vercel function logs — if you see this warning,
+    // the proxy will fall back to localhost (which is unreachable from
+    // Vercel's servers). Set NEXT_PUBLIC_API_URL in the Vercel project's
+    // Environment Variables to your Render gateway URL, e.g.
+    //   https://bses-dyfb.onrender.com/api
+    // eslint-disable-next-line no-console
+    console.warn(
+      '[BSES_PROXY] No BACKEND_API_URL or NEXT_PUBLIC_API_URL set — proxy will fall back to',
+      raw,
+      'Set NEXT_PUBLIC_API_URL in your Vercel project env vars to your Render gateway URL.',
+    );
+  }
   return raw.replace(/\/+$/, '');
 }
 
@@ -95,7 +123,10 @@ interface ParsedCookie {
 }
 
 function parseCookieHeader(cookieStr: string): ParsedCookie | null {
-  const parts = cookieStr.split(';').map((p) => p.trim()).filter(Boolean);
+  const parts = cookieStr
+    .split(';')
+    .map((p) => p.trim())
+    .filter(Boolean);
   if (parts.length === 0) return null;
 
   const [first, ...attributes] = parts;
@@ -200,12 +231,22 @@ async function proxy(
       redirect: 'manual',
     });
   } catch (err: any) {
+    // eslint-disable-next-line no-console
+    console.error('[BSES_PROXY] upstream fetch failed', {
+      url: upstreamUrl,
+      method,
+      message: err?.message,
+      code: err?.code,
+      cause: err?.cause?.message,
+    });
     return new NextResponse(
       JSON.stringify({
         success: false,
         error: {
           code: 'UPSTREAM_UNREACHABLE',
-          message: 'Backend gateway is temporarily unreachable',
+          message:
+            `Backend gateway is temporarily unreachable (tried ${upstreamUrl}). ` +
+            `Check that NEXT_PUBLIC_API_URL is set in your Vercel project env vars.`,
         },
       }),
       {
