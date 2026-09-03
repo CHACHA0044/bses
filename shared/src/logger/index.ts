@@ -55,8 +55,15 @@ export const createLogger = ({ service, logDir = 'logs' }: LoggerOptions): winst
     );
   }
 
+  // Production defaults to 'info' so request logs, login attempts, and other
+  // diagnostic logs are visible in Render's log stream. Operators can dial
+  // this down via LOG_LEVEL=warn if they want less noise. Dev defaults to
+  // 'debug' for verbose local development.
+  const defaultLevel = isProduction ? 'info' : 'debug';
+  const level = process.env['LOG_LEVEL'] || defaultLevel;
+
   return winston.createLogger({
-    level: isProduction ? 'warn' : 'debug',
+    level,
     defaultMeta: { service },
     transports,
     exitOnError: false,
