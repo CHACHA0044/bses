@@ -28,8 +28,32 @@ interface ServerAlert { type: AlertType; message: string; }
 
 function classifyError(err: any): ServerAlert {
   const status = err?.response?.status;
-  const message: string = err?.response?.data?.error?.message || '';
-  if (!err?.response) return { type: 'network', message: 'Unable to reach the server. Please check your connection.' };
+  const data: any = err?.response?.data;
+  // Vercel protects preview/branch deployments with its own SSO gate. The
+  // upstream response is JSON like
+  // `{ protection: { vercel_auth_enabled: true, ... }, error: { code: '401',
+  // message: 'Protected deployment' } }`. Surface a clear, actionable message
+  // instead of a generic "Connection Error" — otherwise operators waste time
+  // chasing a backend that is actually fine.
+  const vercelAuthEnabled = !!data?.protection?.vercel_auth_enabled;
+  const vercelProtectedMessage =
+    typeof data?.error?.message === 'string' && /protected deployment/i.test(data.error.message);
+  if (vercelAuthEnabled || vercelProtectedMessage) {
+    return {
+      type: 'error',
+      message:
+        'This Vercel preview deployment is protected by Vercel Authentication. ' +
+        'Open the deployment URL in the Vercel dashboard, go to Settings → Deployment Protection, ' +
+        'and disable Vercel Authentication (or use the production URL bses-gateway.vercel.app).',
+    };
+  }
+  const message: string = data?.error?.message || '';
+  if (!err?.response) {
+    return {
+      type: 'network',
+      message: 'Unable to reach the server. Please check your connection.',
+    };
+  }
   if (status === 401 || message.toLowerCase().includes('credentials')) return { type: 'credentials', message: 'Incorrect username or password. Please try again.' };
   if (status === 423 || message.toLowerCase().includes('locked')) return { type: 'warning', message: message || 'Account temporarily locked.' };
   return { type: 'error', message: message || 'Something went wrong. Please try again.' };
