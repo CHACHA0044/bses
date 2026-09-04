@@ -21,9 +21,28 @@ export const correlationId = (req: Request, res: Response, next: NextFunction): 
   next();
 };
 
+/**
+ * Request paths that should NOT be logged by `requestLogger`. These are
+ * high-frequency, low-signal endpoints that would otherwise drown out the log
+ * stream when scraped by external monitors (UptimeRobot, Render's own
+ * liveness probes, internal self-polling keep-alives, etc.). If you need to
+ * debug one of these, hit it directly — the `/health`, `/ready`, `/ping` and
+ * `HEAD /` paths are still served normally, they just don't print a log line.
+ *
+ * For the gateway specifically this matters a LOT: its self-polling keep-alive
+ * fires /ping every 3 minutes, and without this filter each ping would emit
+ * TWO log lines (the explicit Self-ping hit log + the auto HTTP Request log),
+ * which is exactly the "messy" behavior the team flagged.
+ */
+const REQUEST_LOG_SKIP_PATHS: ReadonlySet<string> = new Set(['/ping', '/health', '/ready']);
+
 export const requestLogger = (req: Request, res: Response, next: NextFunction): void => {
   const start = Date.now();
   res.on('finish', () => {
+    // Skip noisy low-signal endpoints (see REQUEST_LOG_SKIP_PATHS doc).
+    if (REQUEST_LOG_SKIP_PATHS.has(req.path)) return;
+    // Also skip HEAD probes (Render's liveness probe hits HEAD /).
+    if (req.method === 'HEAD') return;
     logger.info('HTTP Request', {
       method: req.method,
       path: req.path,
