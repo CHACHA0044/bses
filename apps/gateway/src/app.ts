@@ -14,10 +14,13 @@ import {
   createHealthHandlers,
   sendSuccess,
   isAllowedOrigin,
+  createLogger,
 } from '@bses/shared';
 import { config } from './config';
 import { registerRoutes } from './routes';
 import { getSupervisorStatus } from './supervisorStatus';
+
+const logger = createLogger({ service: 'gateway-ping' });
 
 /** In-process hit counter for the /ping keep-alive endpoint (replaces Redis INCR). */
 let pingHits = 0;
@@ -197,6 +200,19 @@ export const createApp = (): express.Application => {
         `Keep-alive heartbeat: ${iterations.toLocaleString()} ops, instance ${snapshot.pid}.`,
       ];
       const message = messages[Math.floor(Math.random() * messages.length)];
+
+      // Log each ping so the self-polling loop is visible in Render's log
+      // stream — proves the keep-alive is actually exercising the event loop
+      // (and not just hitting a static cache).
+      logger.info('Self-ping hit', {
+        iterations,
+        cpuSample: cpuSample.toFixed(2),
+        pingHits,
+        pid: snapshot.pid,
+        uptime: snapshot.uptime,
+        rss: snapshot.rss,
+        elapsedMs: Date.now() - started,
+      });
 
       sendSuccess(res, {
         pong: true,
