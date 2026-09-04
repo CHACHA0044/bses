@@ -19,6 +19,9 @@ import { config } from './config';
 import { registerRoutes } from './routes';
 import { getSupervisorStatus } from './supervisorStatus';
 
+/** In-process hit counter for the /ping keep-alive endpoint (replaces Redis INCR). */
+let pingHits = 0;
+
 export const createApp = (): express.Application => {
   const app = express();
 
@@ -115,32 +118,118 @@ export const createApp = (): express.Application => {
   app.get('/ready', readinessHandler);
   app.get('/version', versionHandler);
 
-  // Self-ping keep-alive: a cheap /ping endpoint that does a small CPU + memory
-  // workout and returns. Render (and similar PaaS) spin down free/cheap
-  // instances after a few minutes of no traffic. An external cron (e.g. an
-  // UptimeRobot monitor or GitHub Action) hitting /ping every 3 minutes keeps
-  // the service warm and avoids cold-start delays on real user traffic.
-  // The light "work" is a checksum over a process-snapshot string so a passive
-  // observability tool can confirm the request actually exercised the event loop
-  // (and didn't just hit a static cache).
+  // Self-ping keep-alive: an external cron (e.g. UptimeRobot or a GitHub Action)
+  // hits /ping every few minutes so Render (and similar PaaS) does NOT spin down
+  // the instance after the no-traffic idle window. Without this, cold starts on
+  // real user traffic add several seconds of latency.
+  //
+  // Design goals for this endpoint:
+  //   - Do enough varied CPU work that a passive observer can confirm the event
+  //     loop actually executed (not a cached/static response).
+  //   - Surface the gateway's own health (process snapshot) plus the supervisor
+  //     IPC-reported state of the child services, so a /ping call is also a
+  //     lightweight liveness check of the whole stack.
+  //   - Vary iteration count + operation + response message per call so the
+  //     response signature is not trivially cacheable / scrapable.
+  //   - Stay dependency-free (no Redis / Mongoose in the gateway) — the gateway
+  //     already has a cheap, fast path; we deliberately do not introduce new
+  //     infra here, just exercise the event loop harder.
   app.get('/ping', (_req, res) => {
-    const started = Date.now();
-    const snapshot = JSON.stringify({
-      pid: process.pid,
-      uptime: process.uptime(),
-      memory: process.memoryUsage().rss,
-      timestamp: started,
-    });
-    let hash = 0;
-    for (let i = 0; i < snapshot.length; i++) {
-      hash = (hash * 31 + snapshot.charCodeAt(i)) | 0;
+    try {
+      const started = Date.now();
+
+      // Randomized CPU work: 500-2000 iterations, one of 5 operations chosen at
+      // random per request. Different operation + different count each time means
+      // a static scraper can't fingerprint the response.
+      const iterations = Math.floor(500 + Math.random() * 1500);
+      const operations: Array<(i: number, r: number) => number> = [
+        (i, r) => Math.sqrt(i * r),
+        (i, r) => Math.pow(i, r % 3),
+        (i, r) => Math.log(i + 1) * r,
+        (i, r) => Math.sin(i) * Math.cos(r * i),
+        (i, r) => (i * r) % 997, // prime modulo for extra entropy
+      ];
+      // Pick a random operation. We assert non-undefined for the type checker —
+      // `Math.floor(Math.random() * operations.length)` is always a valid index
+      // because the index range is [0, length - 1].
+      const opIndex = Math.floor(Math.random() * operations.length);
+      const operation = operations[opIndex] ?? operations[0]!;
+      const cpuSample = Array.from({ length: iterations }, (_, i) => operation(i, Math.random())).reduce(
+        (a, b) => a + b,
+        0,
+      );
+
+      // Process snapshot — useful to confirm the same instance answered (pid
+      // + uptime) and that memory is stable (no leak on the keep-alive path).
+      const snapshot = {
+        pid: process.pid,
+        uptime: process.uptime(),
+        rss: process.memoryUsage().rss,
+        timestamp: started,
+      };
+
+      // Lightweight in-process hit counter. This replaces the example's Redis
+      // INCR — the gateway doesn't depend on Redis, and a counter here is plenty
+      // for proving the endpoint is being polled (it's a monotonic signal that
+      // survives across requests inside this process).
+      pingHits += 1;
+
+      // Pull supervisor-reported child-service state via IPC. Under the BSES
+      // supervisor this reflects live readiness of auth / consumer / document /
+      // notification without opening any new ports. When the gateway runs
+      // standalone (no IPC), we degrade to a 'unknown' status — the ping is still
+      // useful as a warm-up signal.
+      const supervisor = getSupervisorStatus();
+      const childServices = supervisor
+        ? supervisor.services.reduce<Record<string, string>>((acc, s) => {
+            acc[s.name] = s.state;
+            return acc;
+          }, {})
+        : null;
+
+      // Vary the response message so a passive scraper can't trivially identify
+      // /ping as a static response (e.g. for "is this a real backend?" checks).
+      const messages = [
+        `Server is awake and did calculations...${iterations.toLocaleString()}`,
+        `Good evening, Colonel. Can I give you a lift? ${iterations.toLocaleString()}`,
+        `Pong. ${iterations.toLocaleString()} ops executed.`,
+        `Still here. ${iterations.toLocaleString()} iterations this round.`,
+        `Keep-alive heartbeat: ${iterations.toLocaleString()} ops, instance ${snapshot.pid}.`,
+      ];
+      const message = messages[Math.floor(Math.random() * messages.length)];
+
+      sendSuccess(res, {
+        pong: true,
+        message,
+        cpuSample: cpuSample.toFixed(2),
+        iterations,
+        pingHits,
+        snapshot,
+        services: childServices,
+        supervisor: supervisor
+          ? {
+              pid: supervisor.supervisor.pid,
+              uptimeSeconds: supervisor.supervisor.uptimeSeconds,
+              state: supervisor.supervisor.state,
+            }
+          : null,
+        elapsedMs: Date.now() - started,
+        timestamp: new Date(started).toISOString(),
+      });
+    } catch (err) {
+      // /ping must never 5xx — a failing keep-alive defeats its own purpose. Log
+      // and return a minimal pong so the external monitor keeps hitting the URL.
+      // eslint-disable-next-line no-console
+      console.error('[/ping] unexpected error:', err);
+      try {
+        res.status(200).json({
+          success: true,
+          data: { pong: true, degraded: true, error: err instanceof Error ? err.message : 'unknown' },
+        });
+      } catch {
+        /* response already sent */
+      }
     }
-    sendSuccess(res, {
-      pong: true,
-      checksum: hash,
-      elapsedMs: Date.now() - started,
-      timestamp: new Date(started).toISOString(),
-    });
   });
 
   // Aggregated status: gateway + supervisor + every internal service. The
