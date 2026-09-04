@@ -43,6 +43,41 @@ export interface DashboardPayload {
 }
 
 /**
+ * Resolve the displayed first name from whichever payload shape is available.
+ *
+ * The backend has historically used two contracts for the dashboard consumer
+ * object:
+ *   - `{ firstName, lastName }` — the canonical /users/profile contract
+ *   - `{ name: 'First Last' }`  — the /users/dashboard contract, returned by
+ *                                 the consumer-service's getDashboardData()
+ *
+ * When the dashboard `consumer` payload is the second shape (no `firstName`),
+ * the welcome banner used to silently fall back to a bare "Good evening!" even
+ * though the navbar correctly showed the full name from the auth store. We
+ * now accept either shape, and as a final fallback split `name` on the first
+ * whitespace so the greeting is always personal.
+ */
+function resolveFirstName(input: { firstName?: string | null; name?: string | null } | null | undefined): string | null {
+  if (!input) return null;
+  if (input.firstName && input.firstName.trim()) return input.firstName.trim();
+  if (input.name && input.name.trim()) {
+    const first = input.name.trim().split(/\s+/)[0];
+    return first || null;
+  }
+  return null;
+}
+
+function resolveLastName(input: { lastName?: string | null; name?: string | null } | null | undefined): string | null {
+  if (!input) return null;
+  if (input.lastName && input.lastName.trim()) return input.lastName.trim();
+  if (input.name && input.name.trim()) {
+    const parts = input.name.trim().split(/\s+/);
+    return parts.length > 1 ? parts.slice(1).join(' ') : null;
+  }
+  return null;
+}
+
+/**
  * WelcomeBanner — the dashboard hero. Renders from the auth store during the
  * initial data load so the greeting appears together with the navbar (no flash
  * where the name is ready but the page is still a bare skeleton).
@@ -167,6 +202,13 @@ export function DashboardView({ initialData }: { initialData?: DashboardPayload 
 
   const dashboard = data?.dashboard ?? {};
   const consumer = dashboard.consumer || user;
+  // The dashboard payload uses the `{ name: 'First Last' }` shape, while the
+  // auth store user uses `{ firstName, lastName }`. resolveFirstName handles
+  // both so the greeting is always personalized.
+  const displayFirstName =
+    resolveFirstName(consumer as { firstName?: string | null; name?: string | null }) ?? user?.firstName ?? null;
+  const displayLastName =
+    resolveLastName(consumer as { lastName?: string | null; name?: string | null }) ?? user?.lastName ?? null;
   const stats = dashboard.stats || {
     totalApplications: 0,
     pendingCount: 0,
@@ -179,8 +221,8 @@ export function DashboardView({ initialData }: { initialData?: DashboardPayload 
     <div className="space-y-8 p-2 max-w-7xl mx-auto">
       {/* Welcome Banner */}
       <WelcomeBanner
-        firstName={consumer?.firstName}
-        lastName={consumer?.lastName}
+        firstName={displayFirstName}
+        lastName={displayLastName}
         status={consumer?.status || 'ACTIVE'}
       >
         {/* Buttons — PrefetchLink warms the destination on hover/focus/touch
