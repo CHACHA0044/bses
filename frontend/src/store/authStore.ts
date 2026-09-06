@@ -21,11 +21,13 @@ interface AuthState {
   user: UserProfile | null;
   isAuthenticated: boolean;
   isLoading: boolean;
+  isLoadingLogout: boolean;
   error: string | null;
   setUser: (user: UserProfile | null) => void;
   setCachedUser: (user: UserProfile | null) => void;
   checkSession: (silent?: boolean) => Promise<void>;
   logout: (router?: { push: (href: string) => void }) => Promise<void>;
+  resetLogoutState: () => void;
 }
 
 /**
@@ -52,6 +54,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   user: null,
   isAuthenticated: false,
   isLoading: true,
+  isLoadingLogout: false,
   error: null,
 
   setUser: (user) => {
@@ -63,7 +66,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         try { sessionStorage.removeItem('bses_user'); } catch {}
       }
     }
-    set({ user, isAuthenticated: !!user, isLoading: false, error: null });
+    set({ user, isAuthenticated: !!user, isLoading: false, error: null, isLoadingLogout: false });
   },
 
   setCachedUser: (user) => {
@@ -114,21 +117,37 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     }
   },
 
+  /**
+   * Logout — guarded against double submissions.
+   *
+   * The `isLoadingLogout` flag is set BEFORE the request is sent and is only
+   * cleared in the `finally` block. Any second click while the first request is
+   * pending is a no-op: the store-level guard short-circuits immediately so the
+   * API is never hit twice. If the request fails, the flag is cleared and the
+   * button returns to a normal clickable state so the user can retry.
+   */
   logout: async (router) => {
+    if (get().isLoadingLogout) return;
+    set({ isLoadingLogout: true, error: null });
     try {
       await apiClient.post('/auth/logout');
-    } catch {
-      // Ignore API failure
+    } catch (err: any) {
+      // Surface the failure so the UI can restore the button and offer a retry.
+      set({ error: err?.message || 'Logout failed' });
     } finally {
       if (typeof window !== 'undefined') {
         try { sessionStorage.clear(); } catch {}
       }
-      set({ user: null, isAuthenticated: false, isLoading: false, error: null });
+      set({ user: null, isAuthenticated: false, isLoading: false, isLoadingLogout: false, error: null });
       if (router) {
         router.push('/login');
       } else if (typeof window !== 'undefined') {
         window.location.href = '/login';
       }
     }
+  },
+
+  resetLogoutState: () => {
+    set({ isLoadingLogout: false, error: null });
   },
 }));

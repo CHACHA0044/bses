@@ -32,8 +32,20 @@ export const uploadMiddleware = multer({
     fieldSize: 1024 * 1024,
   },
   fileFilter: (_req, file, cb) => {
-    if (!ALLOWED_TYPES.includes(file.mimetype)) {
-      return cb(new ValidationError('Invalid file type. Only PDF, JPEG, PNG, WebP, and AVIF files are accepted.'));
+    const ext = path.extname(file.originalname).toLowerCase();
+    const isAllowedExt = ['.pdf', '.jpg', '.jpeg', '.png', '.webp', '.avif'].includes(ext);
+    const isAllowedMime =
+      ALLOWED_TYPES.includes(file.mimetype) ||
+      ['application/octet-stream', 'image/x-png', 'image/pjpeg', 'image/x-webp', 'image/jpg'].includes(
+        file.mimetype,
+      );
+
+    if (!isAllowedMime && !isAllowedExt) {
+      return cb(
+        new ValidationError(
+          'Invalid file type. Only PDF, JPEG, PNG, WebP, and AVIF files are accepted.',
+        ),
+      );
     }
     cb(null, true);
   },

@@ -43,11 +43,8 @@ export const requestLogger = (req: Request, res: Response, next: NextFunction): 
     if (REQUEST_LOG_SKIP_PATHS.has(req.path)) return;
     // Also skip HEAD probes (Render's liveness probe hits HEAD /).
     if (req.method === 'HEAD') return;
-    logger.info('HTTP Request', {
-      method: req.method,
-      path: req.path,
-      status: res.statusCode,
-      ms: Date.now() - start,
+    const duration = Date.now() - start;
+    logger.info(`HTTP ${req.method} ${req.path} -> ${res.statusCode} (${duration}ms)`, {
       correlationId: req.correlationId,
       ip: req.ip,
     });

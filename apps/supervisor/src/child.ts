@@ -50,6 +50,58 @@ const SHUTDOWN_WAIT_MS = 10_000;
 const REASON_NORMAL = 0;
 
 /**
+  Formats raw stdout/stderr lines from child processes into clean, human-readable
+  log entries for the supervisor console stream.
+ */
+function formatChildLog(serviceName: string, rawLine: string): string {
+  const trimmed = rawLine.trim();
+  if (!trimmed) return '';
+
+  if (trimmed.startsWith(`[${serviceName}]`)) {
+    return trimmed;
+  }
+
+  if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+    try {
+      const parsed = JSON.parse(trimmed) as Record<string, unknown>;
+      if (typeof parsed === 'object' && parsed !== null) {
+        const level = String(parsed['level'] || 'info').toUpperCase();
+        const msg = String(parsed['message'] || '');
+        const service = parsed['service'] ? String(parsed['service']) : serviceName;
+
+        if (parsed['method'] && parsed['path'] && parsed['status']) {
+          const ms = parsed['ms'] !== undefined ? ` (${parsed['ms']}ms)` : '';
+          return `[${serviceName}] ${level} [${service}]: HTTP ${parsed['method']} ${parsed['path']} -> ${parsed['status']}${ms}`;
+        }
+
+        const { level: _l, timestamp: _t, service: _s, message: _m, ...rest } = parsed;
+        const keys = Object.keys(rest);
+        let metaStr = '';
+        if (keys.length > 0) {
+          const parts = keys.map((k) => {
+            const val = rest[k];
+            if (typeof val === 'object' && val !== null) {
+              try {
+                return `${k}=${JSON.stringify(val)}`;
+              } catch {
+                return `${k}=[object]`;
+              }
+            }
+            return `${k}=${String(val)}`;
+          });
+          metaStr = ` (${parts.join(', ')})`;
+        }
+        return `[${serviceName}] ${level} [${service}]: ${msg}${metaStr}`;
+      }
+    } catch {
+      /* fallback to raw line */
+    }
+  }
+
+  return `[${serviceName}] ${trimmed}`;
+}
+
+/**
  * Manages one logical service as a forked Node child process. Responsible for
  * spawning, streaming logs to the supervisor output, detecting unready/unhealthy
  * exits, and restarting with exponential backoff + crash-loop protection.
@@ -122,16 +174,22 @@ export class ChildManager {
     child.stderr?.setEncoding('utf8');
     child.stdout?.on('data', (chunk: string) => {
       try {
-        const line = chunk.replace(/\r?\n$/, '');
-        if (line.trim()) console.log(`[${this.options.spec.name}] ${line}`);
+        const lines = chunk.split(/\r?\n/);
+        for (const line of lines) {
+          const formatted = formatChildLog(this.options.spec.name, line);
+          if (formatted) console.log(formatted);
+        }
       } catch {
         /* ignore malformed chunk */
       }
     });
     child.stderr?.on('data', (chunk: string) => {
       try {
-        const line = chunk.replace(/\r?\n$/, '');
-        if (line.trim()) console.error(`[${this.options.spec.name}] ${line}`);
+        const lines = chunk.split(/\r?\n/);
+        for (const line of lines) {
+          const formatted = formatChildLog(this.options.spec.name, line);
+          if (formatted) console.error(formatted);
+        }
       } catch {
         /* ignore malformed chunk */
       }

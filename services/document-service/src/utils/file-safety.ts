@@ -92,7 +92,7 @@ export interface UploadContent {
  *
  * Throws a `ValidationError` with a user-facing message when unsafe.
  */
-export const validateUploadContent = async (file: UploadContent): Promise<void> => {
+export const validateUploadContent = async (file: UploadContent): Promise<DetectedFileType> => {
   const { buffer, declaredMimeType, originalName } = file;
 
   if (originalName && /[\r\n\u0000-\u001f]/.test(originalName)) {
@@ -126,7 +126,7 @@ export const validateUploadContent = async (file: UploadContent): Promise<void> 
   if (detected === 'application/pdf') {
     // PDFs are parsed only by pdfjs (text extraction) with JS disabled and a
     // page cap; the 2 MB multer limit bounds the input before that runs.
-    return;
+    return detected;
   }
 
   // Image-bomb guard: read the dimensions from the header (no pixel decode)
@@ -141,6 +141,7 @@ export const validateUploadContent = async (file: UploadContent): Promise<void> 
         `This image is too large to process (${width}×${height}px). Please upload a smaller image.`,
       );
     }
+    return detected;
   } catch (err) {
     if (err instanceof ValidationError) throw err;
     throw new ValidationError(

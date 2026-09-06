@@ -201,24 +201,22 @@ export const createApp = (): express.Application => {
       ];
       const message = messages[Math.floor(Math.random() * messages.length)];
 
-      // Log self-ping activity, but don't spam the log stream. Always log
-      // the very first hit (proves the keep-alive is wired up after a fresh
-      // deploy), then log every Nth hit (default 20 = ~1 hour at 3 min
-      // interval) so operators can confirm the loop is still running without
-      // drowning the log in noise. The endpoint response still includes the
-      // full payload (iterations, cpuSample, pingHits, snapshot, services)
-      // for ad-hoc inspection via curl.
-      const logEvery = Number(process.env.SELF_PING_LOG_EVERY) || 20;
+      // Log self-ping activity on every execution (or as configured by SELF_PING_LOG_EVERY).
+      const logEvery = Number(process.env.SELF_PING_LOG_EVERY) || 1;
       if (pingHits === 1 || pingHits % logEvery === 0) {
-        logger.info('Self-ping hit', {
-          iterations,
-          cpuSample: cpuSample.toFixed(2),
-          pingHits,
-          pid: snapshot.pid,
-          uptime: Math.round(snapshot.uptime),
-          rssMb: Math.round(snapshot.rss / 1024 / 1024),
-          elapsedMs: Date.now() - started,
-        });
+        const elapsed = Date.now() - started;
+        logger.info(
+          `[Self-Ping #${pingHits}] ${iterations} ops in ${elapsed}ms | CPU result: ${cpuSample.toFixed(2)} | RSS: ${Math.round(snapshot.rss / 1024 / 1024)}MB | Uptime: ${Math.round(snapshot.uptime)}s`,
+          {
+            iterations,
+            cpuSample: cpuSample.toFixed(2),
+            pingHits,
+            pid: snapshot.pid,
+            uptime: Math.round(snapshot.uptime),
+            rssMb: Math.round(snapshot.rss / 1024 / 1024),
+            elapsedMs: elapsed,
+          },
+        );
       }
 
       sendSuccess(res, {

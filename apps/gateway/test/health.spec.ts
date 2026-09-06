@@ -21,6 +21,18 @@ describe('Gateway Health Endpoints', () => {
     expect(res.body.data.version).toBe('1.0.0');
   });
 
+  it('GET /ping should execute random calculations and return keep-alive payload', async () => {
+    const res = await request(app).get('/ping');
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body.data.pong).toBe(true);
+    expect(res.body.data.iterations).toBeGreaterThanOrEqual(500);
+    expect(res.body.data.iterations).toBeLessThanOrEqual(2000);
+    expect(res.body.data.cpuSample).toBeDefined();
+    expect(res.body.data.pingHits).toBeGreaterThan(0);
+    expect(res.body.data.elapsedMs).toBeGreaterThanOrEqual(0);
+  });
+
   it('GET /nonexistent should return 404', async () => {
     const res = await request(app).get('/nonexistent');
     expect(res.status).toBe(404);

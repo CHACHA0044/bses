@@ -74,13 +74,10 @@ export class AuthController {
       // even if validation/Database calls fail or hang, so the operator can
       // see in Render that a registration request was received.
       const ipAddress = extractClientIp(req);
-      logger.info(
-        `[REGISTER_ATTEMPT] timestamp=${new Date().toISOString()} ` +
-          `requestId=${(req as { correlationId?: string }).correlationId || 'n/a'} ` +
-          `username=${redactIdentifier((req.body as { username?: string })?.username)} ` +
-          `email=${redactIdentifier((req.body as { email?: string })?.email)} ` +
-          `ip=${ipAddress}`,
-      );
+      const reqId = (req as { correlationId?: string }).correlationId || 'n/a';
+      const username = redactIdentifier((req.body as { username?: string })?.username);
+      const email = redactIdentifier((req.body as { email?: string })?.email);
+      logger.info(`[REGISTER_ATTEMPT] username=${username} email=${email} ip=${ipAddress} requestId=${reqId}`);
 
       const validated = registerSchema.parse(req.body);
 
@@ -106,18 +103,11 @@ export class AuthController {
 
   public login = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
-      // Structured login-attempt log — fires BEFORE validation and BEFORE any
-      // database call. This guarantees Render shows the attempt timestamp,
-      // correlation ID, redacted identifier, and IP, even if the service
-      // hangs or crashes further down the stack.
       const ipAddress = extractClientIp(req);
-      logger.info(
-        `[LOGIN_ATTEMPT] timestamp=${new Date().toISOString()} ` +
-          `requestId=${(req as { correlationId?: string }).correlationId || 'n/a'} ` +
-          `identifier=${redactIdentifier((req.body as { identifier?: string })?.identifier)} ` +
-          `rememberMe=${(req.body as { rememberMe?: boolean })?.rememberMe === true} ` +
-          `ip=${ipAddress}`,
-      );
+      const reqId = (req as { correlationId?: string }).correlationId || 'n/a';
+      const identifier = redactIdentifier((req.body as { identifier?: string })?.identifier);
+      const rememberMe = (req.body as { rememberMe?: boolean })?.rememberMe === true;
+      logger.info(`[LOGIN_ATTEMPT] identifier=${identifier} rememberMe=${rememberMe} ip=${ipAddress} requestId=${reqId}`);
 
       const validated = loginSchema.parse(req.body);
 

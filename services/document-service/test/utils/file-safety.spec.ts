@@ -92,16 +92,16 @@ describe('validateUploadContent', () => {
   it('accepts a genuine PNG with matching declared type', async () => {
     await expect(
       validateUploadContent({ buffer: TINY_PNG, declaredMimeType: 'image/png', originalName: 'card.png' }),
-    ).resolves.toBeUndefined();
+    ).resolves.toBe('image/png');
   });
 
   it('accepts a genuine WebP and AVIF with matching declared types', async () => {
     await expect(
       validateUploadContent({ buffer: TINY_WEBP, declaredMimeType: 'image/webp', originalName: 'card.webp' }),
-    ).resolves.toBeUndefined();
+    ).resolves.toBe('image/webp');
     await expect(
       validateUploadContent({ buffer: TINY_AVIF, declaredMimeType: 'image/avif', originalName: 'card.avif' }),
-    ).resolves.toBeUndefined();
+    ).resolves.toBe('image/avif');
   });
 
   it('rejects when declared MIME does not match actual content', async () => {

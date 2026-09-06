@@ -190,14 +190,6 @@ export class AuthenticationService {
    * Log in user or admin with brute-force protection and account locking.
    */
   public async login(dto: LoginDTO): Promise<{ user: any; tokens: AuthTokens }> {
-    // [LOGIN_ATTEMPT_START] — mirrors the controller-level log but fires inside
-    // the service so we can correlate the Render log line to the exact code
-    // path (user vs admin flow, before any DB reads).
-    logger.info(
-      `[LOGIN_ATTEMPT_START] identifier=${dto.identifier.substring(0, 2)}*** ` +
-        `ip=${dto.ipAddress} timestamp=${new Date().toISOString()}`,
-    );
-
     // 1. Find user or admin
     let user = await userRepository.findByUsernameOrEmail(dto.identifier);
 

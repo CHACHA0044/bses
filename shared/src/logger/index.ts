@@ -4,6 +4,33 @@ import path from 'path';
 
 const { combine, timestamp, printf, colorize, errors, json } = winston.format;
 
+const readableFormat = combine(
+  timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
+  errors({ stack: true }),
+  printf(({ timestamp, level, message, service, stack, ...meta }) => {
+    const levelStr = String(level).toUpperCase();
+    const serviceStr = String(service ?? 'app');
+    const msgStr = String(stack ?? message);
+
+    let metaParts: string[] = [];
+    if (Object.keys(meta).length > 0) {
+      metaParts = Object.entries(meta).map(([k, v]) => {
+        if (typeof v === 'object' && v !== null) {
+          try {
+            return `${k}=${JSON.stringify(v)}`;
+          } catch {
+            return `${k}=[object]`;
+          }
+        }
+        return `${k}=${String(v)}`;
+      });
+    }
+
+    const metaStr = metaParts.length > 0 ? ` (${metaParts.join(', ')})` : '';
+    return `[${String(timestamp)}] [${serviceStr}] ${levelStr}: ${msgStr}${metaStr}`;
+  }),
+);
+
 const devFormat = combine(
   colorize({ all: true }),
   timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
@@ -24,11 +51,15 @@ export interface LoggerOptions {
 export const createLogger = ({ service, logDir = 'logs' }: LoggerOptions): winston.Logger => {
   const isProduction = process.env['NODE_ENV'] === 'production';
   const isTest = process.env['NODE_ENV'] === 'test';
+  const logFormat = process.env['LOG_FORMAT'] ?? 'pretty';
   const resolvedLogDir = path.resolve(process.cwd(), logDir);
+
+  const consoleFormat =
+    logFormat === 'json' ? prodFormat : isProduction ? readableFormat : devFormat;
 
   const transports: winston.transport[] = [
     new winston.transports.Console({
-      format: isProduction ? prodFormat : devFormat,
+      format: consoleFormat,
       silent: isTest,
     }),
   ];

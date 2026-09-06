@@ -9,7 +9,8 @@ import { apiClient } from '@/lib/apiClient';
 import { Alert } from '@/components/ui/Alert';
 import { AlertSlot } from '@/components/ui/AlertSlot';
 import { validateDocumentFile, uploadGuidanceText, ACCEPT_ATTR } from '@/lib/documentUpload';
-import { CheckCircle2, ArrowRight, ArrowLeft, Upload, FileText, AlertCircle, Loader2 } from 'lucide-react';
+import { LocationPickerModal } from '@/components/common/LocationPickerModal';
+import { CheckCircle2, ArrowRight, ArrowLeft, Upload, FileText, AlertCircle, Loader2, MapPin } from 'lucide-react';
 
 const wizardSchema = z.object({
   connectionType: z.enum(['DOMESTIC', 'COMMERCIAL', 'INDUSTRIAL', 'AGRICULTURAL']),
@@ -28,12 +29,14 @@ export default function ApplyConnectionPage() {
   const [uploadWarning, setUploadWarning] = useState<string | null>(null);
   const [optimizingFile, setOptimizingFile] = useState(false);
   const [uploadedDocs, setUploadedDocs] = useState<any[]>([]);
+  const [isMapOpen, setIsMapOpen] = useState(false);
 
   const {
     register,
     handleSubmit,
     watch,
     trigger,
+    setValue,
     formState: { errors, isSubmitting },
   } = useForm<WizardFormData>({
     resolver: zodResolver(wizardSchema),
@@ -254,7 +257,17 @@ export default function ApplyConnectionPage() {
           <div className="space-y-4">
             <h2 className="text-sm font-bold text-slate-800 uppercase">Step 1: Property Location</h2>
             <div>
-              <label className="block text-xs font-semibold text-slate-700 uppercase mb-1">Full Property Address *</label>
+              <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                <label className="block text-xs font-semibold text-slate-700 uppercase">Full Property Address *</label>
+                <button
+                  type="button"
+                  onClick={() => setIsMapOpen(true)}
+                  className="inline-flex items-center gap-1.5 text-xs font-bold text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-300 rounded-xl px-3 py-1.5 transition cursor-pointer active:scale-95 shadow-sm"
+                >
+                  <MapPin className="w-3.5 h-3.5 text-amber-600" />
+                  <span>Choose / Pin Location on Map</span>
+                </button>
+              </div>
               <textarea
                 {...register('propertyAddress')}
                 rows={4}
@@ -267,6 +280,14 @@ export default function ApplyConnectionPage() {
               />
               {errors.propertyAddress && <p className="text-xs font-semibold text-red-500 mt-1.5 flex items-center gap-1"><AlertCircle className="w-3.5 h-3.5" />{errors.propertyAddress.message}</p>}
             </div>
+
+            <LocationPickerModal
+              isOpen={isMapOpen}
+              onClose={() => setIsMapOpen(false)}
+              onSelectAddress={(addr) => setValue('propertyAddress', addr, { shouldValidate: true })}
+              initialAddress={propertyAddressVal}
+            />
+
             <div className="flex justify-center pt-2">
               <button
                 type="button"

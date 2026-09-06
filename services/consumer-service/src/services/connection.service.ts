@@ -183,10 +183,7 @@ export class ConnectionService {
   }
 
   public async getDashboardData(userId: string): Promise<any> {
-    // [DASHBOARD_FETCH_START] — fires immediately on handler entry so we can
-    // correlate the Render log to the exact user+timestamp of the dashboard
-    // request, even if Postgres is slow/unreachable downstream.
-    logger.info(`[DASHBOARD_FETCH_START] userId=${userId} timestamp=${new Date().toISOString()}`);
+    logger.info(`Dashboard data requested for userId=${userId}`);
 
     const user = await userRepository.findById(userId);
     if (!user) throw new NotFoundError('User');

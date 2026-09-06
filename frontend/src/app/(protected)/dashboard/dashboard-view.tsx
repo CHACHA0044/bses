@@ -10,24 +10,7 @@ import { Button } from '@/components/ui/Button';
 import { StatusChip } from '@/components/ui/Badge';
 import { DashboardSkeleton } from '@/components/ui/Skeleton';
 import { PrefetchLink } from '@/components/ui/PrefetchLink';
-import {
-  Zap,
-  User,
-  FilePlus,
-  FolderOpen,
-  CheckCircle2,
-  Clock,
-  AlertCircle,
-  FileText,
-  ArrowRight,
-  ShieldCheck,
-  Sun,
-  ShieldAlert,
-  HelpCircle,
-  Phone,
-  BarChart3,
-  Flame,
-} from 'lucide-react';
+import { Zap, User, FilePlus, FolderOpen, CheckCircle2, Clock, AlertCircle, FileText, ArrowRight, ShieldCheck, Sun, ShieldAlert, HelpCircle, Phone, BarChart3, Flame, } from 'lucide-react';
 
 export interface DashboardPayload {
   dashboard?: {

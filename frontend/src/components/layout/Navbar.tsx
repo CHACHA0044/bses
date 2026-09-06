@@ -6,7 +6,13 @@ import { usePathname, useRouter } from 'next/navigation';
 import { useAuth } from '@/hooks/useAuth';
 import { Logo } from '../common/Logo';
 import { Button } from '../ui/Button';
-import { interactiveBase, navItemBase, iconButton } from '../ui/InteractionProps';
+import {
+  interactiveBase,
+  navItemBase,
+  iconButton,
+  loadingState,
+  pressedState,
+} from '../ui/InteractionProps';
 import {
   Bell,
   LogOut,
@@ -19,24 +25,26 @@ import {
   Settings,
   HelpCircle,
   Home,
+  LogIn,
+  Loader2,
 } from 'lucide-react';
 
 /* ── Public nav (unauthenticated only) ─────────────────────────── */
 const publicNavLinks = [
-  { href: '/',            label: 'Home' },
-  { href: '/about',       label: 'About Portal' },
+  { href: '/', label: 'Home' },
+  { href: '/about', label: 'About Portal' },
   { href: '/help-center', label: 'Help & FAQs' },
-  { href: '/dpdp-act',    label: 'DPDP Compliance' },
+  { href: '/dpdp-act', label: 'DPDP Compliance' },
 ];
 
 /* ── Authenticated mobile nav sequence ──────────────────────────── */
 const authMobileNavItems = [
-  { href: '/',                 label: 'Home',            icon: Home },
-  { href: '/profile',          label: 'My Profile',      icon: UserCheck },
-  { href: '/connections/apply',label: 'New Connection',  icon: FilePlus },
-  { href: '/connections',      label: 'Track Applications', icon: FolderOpen },
-  { href: '/settings',         label: 'Settings',        icon: Settings },
-  { href: '/help-center',      label: 'Help & FAQs',     icon: HelpCircle },
+  { href: '/', label: 'Home', icon: Home },
+  { href: '/profile', label: 'My Profile', icon: UserCheck },
+  { href: '/connections/apply', label: 'New Connection', icon: FilePlus },
+  { href: '/connections', label: 'Track Applications', icon: FolderOpen },
+  { href: '/settings', label: 'Settings', icon: Settings },
+  { href: '/help-center', label: 'Help & FAQs', icon: HelpCircle },
 ];
 
 /* Build the contextual mobile nav: hide current page, prepend Dashboard if not on it */
@@ -51,8 +59,9 @@ function buildMobileNav(pathname: string, dashHref: string) {
 export const Navbar: React.FC = () => {
   const pathname = usePathname();
   const router = useRouter();
-  const { user, isAuthenticated, isLoading, logout } = useAuth();
-  const dashHref = (user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN') ? '/admin/dashboard' : '/dashboard';
+  const { user, isAuthenticated, isLoading, isLoadingLogout, logout } = useAuth();
+  const dashHref =
+    user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN' ? '/admin/dashboard' : '/dashboard';
 
   // Mobile drawer states
   const [menuOpen, setMenuOpen] = useState(false);
@@ -92,7 +101,9 @@ export const Navbar: React.FC = () => {
   // Close on Escape
   useEffect(() => {
     if (!menuOpen) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') closeMenu(); };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') closeMenu();
+    };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [menuOpen, closeMenu]);
@@ -172,7 +183,10 @@ export const Navbar: React.FC = () => {
             {isLoading ? (
               /* Session is still being verified — show a neutral placeholder so
                  the nav never flickers between logged-in / logged-out states. */
-              <div className="h-8 w-8 rounded-full bg-slate-100 skeleton-shimmer" aria-hidden="true" />
+              <div
+                className="h-8 w-8 rounded-full bg-slate-100 skeleton-shimmer"
+                aria-hidden="true"
+              />
             ) : isAuthenticated ? (
               <div className="flex items-center gap-2">
                 <Link
@@ -203,29 +217,49 @@ export const Navbar: React.FC = () => {
                   </div>
                 </div>
 
-                <button
-                  onClick={() => logout(router)}
-                  className={iconButton}
+                {/* Logout — built on the shared Button so it inherits the same
+                    hover / focus-visible / active / disabled / loading / focus
+                    ring / icon-size treatment as every other button. The store-
+                    level `isLoadingLogout` guard prevents duplicate submissions:
+                    the first click flips the flag and the action becomes a
+                    no-op for every subsequent click until the request resolves.
+                    A failed request clears the flag so the button becomes
+                    clickable again. */}
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  isLoading={isLoadingLogout}
+                  loadingLabel="Signing out"
+                  disabled={isLoadingLogout}
+                  onClick={() => {
+                    if (isLoadingLogout) return;
+                    logout(router);
+                  }}
                   aria-label="Sign out"
                   title="Sign out"
+                  className="!px-2.5 !py-1.5 !min-h-[32px] !rounded-full !text-error hover:!bg-red-50 hover:!text-error"
+                  leftIcon={
+                    isLoadingLogout ? undefined : <LogOut className="h-4 w-4" aria-hidden="true" />
+                  }
                 >
-                  <LogOut className="h-4 w-4" />
-                </button>
+                  <span className="hidden sm:inline">Sign out</span>
+                </Button>
               </div>
             ) : (
+              /* Unauthenticated top-bar: NO login button. The Login entry is
+                 reached from the desktop sidebar (when one is visible) or from
+                 the mobile hamburger menu — both are part of the same nav
+                 system, so Login appears in exactly one place per breakpoint.
+                 The New Registration CTA is intentionally kept here because
+                 registration is the primary conversion goal of the marketing
+                 site. */
               <div className="flex items-center gap-2">
-                {pathname !== '/login' && (
-                  <Link href="/login" prefetch={true} className="hidden sm:block">
-                    <Button variant="secondary" size="sm">Consumer Login</Button>
-                  </Link>
-                )}
                 {pathname !== '/register' && (
-                  <Link
-                    href="/register"
-                    prefetch={true}
-                    className={pathname === '/login' ? 'hidden sm:block' : undefined}
-                  >
-                    <Button variant="cta" size="sm">New Registration</Button>
+                  <Link href="/register" prefetch={true}>
+                    <Button variant="cta" size="sm">
+                      New Registration
+                    </Button>
                   </Link>
                 )}
               </div>
@@ -316,10 +350,14 @@ export const Navbar: React.FC = () => {
                         aria-current={isActive ? 'page' : undefined}
                       >
                         <span className="flex items-center gap-3 text-base">
-                          <Icon className={`h-4 w-4 shrink-0 ${isActive ? 'text-primary' : 'text-slate-400'}`} />
+                          <Icon
+                            className={`h-4 w-4 shrink-0 ${isActive ? 'text-primary' : 'text-slate-400'}`}
+                          />
                           {item.label}
                         </span>
-                        <ChevronRight className={`h-4 w-4 shrink-0 ${isActive ? 'text-primary' : 'text-slate-300'}`} />
+                        <ChevronRight
+                          className={`h-4 w-4 shrink-0 ${isActive ? 'text-primary' : 'text-slate-300'}`}
+                        />
                       </Link>
                     );
                   })}
@@ -327,14 +365,35 @@ export const Navbar: React.FC = () => {
                   <div className="my-2 border-t border-slate-100" />
 
                   <button
-                    onClick={() => { logout(router); }}
-                    className={`${navItemBase} justify-between w-full rounded-xl px-4 py-3.5 min-h-[48px] text-error hover:bg-red-50 text-base`}
+                    type="button"
+                    onClick={() => {
+                      if (!isLoadingLogout) {
+                        logout(router);
+                      }
+                    }}
+                    disabled={isLoadingLogout}
+                    aria-busy={isLoadingLogout}
+                    className={[
+                      navItemBase,
+                      pressedState,
+                      'justify-between w-full rounded-xl px-4 py-3.5 min-h-[48px] text-base',
+                      isLoadingLogout
+                        ? `${loadingState} text-error`
+                        : 'text-error hover:bg-red-50 active:bg-red-100',
+                    ].join(' ')}
+                    aria-label={isLoadingLogout ? 'Signing out, please wait' : 'Sign out'}
                   >
                     <span className="flex items-center gap-3">
-                      <LogOut className="h-4 w-4 shrink-0" />
-                      Sign Out
+                      {isLoadingLogout ? (
+                        <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden="true" />
+                      ) : (
+                        <LogOut className="h-4 w-4 shrink-0" aria-hidden="true" />
+                      )}
+                      {isLoadingLogout ? 'Signing out…' : 'Sign Out'}
                     </span>
-                    <ChevronRight className="h-4 w-4 shrink-0 text-red-300" />
+                    {!isLoadingLogout && (
+                      <ChevronRight className="h-4 w-4 shrink-0 text-red-300" aria-hidden="true" />
+                    )}
                   </button>
                 </>
               ) : (
@@ -355,22 +414,63 @@ export const Navbar: React.FC = () => {
                       aria-current={pathname === link.href ? 'page' : undefined}
                     >
                       <span className="text-base">{link.label}</span>
-                      <ChevronRight className={`h-4 w-4 shrink-0 ${pathname === link.href ? 'text-primary' : 'text-slate-400'}`} />
+                      <ChevronRight
+                        className={`h-4 w-4 shrink-0 ${pathname === link.href ? 'text-primary' : 'text-slate-400'}`}
+                      />
                     </Link>
                   ))}
                   <div className="my-2 border-t border-slate-100" />
-                  <div className="space-y-2 pb-2">
-                    {pathname !== '/login' && (
-                      <Link href="/login" prefetch={true} onClick={closeMenu}>
-                        <Button variant="secondary" size="md" fullWidth>Consumer Login</Button>
-                      </Link>
-                    )}
-                    {pathname !== '/register' && (
-                      <Link href="/register" prefetch={true} onClick={closeMenu}>
-                        <Button variant="cta" size="md" fullWidth>New Registration</Button>
-                      </Link>
-                    )}
-                  </div>
+                  {/* Login as a regular mobile menu item — visually identical
+                      to the other public nav items (icon + label + chevron).
+                      Same hover, active, focus and spacing as the other rows. */}
+                  {pathname !== '/login' && (
+                    <Link
+                      href="/login"
+                      prefetch={true}
+                      onClick={closeMenu}
+                      className={[
+                        navItemBase,
+                        'justify-between w-full rounded-xl px-4 py-3.5 min-h-[48px]',
+                        pathname === '/login'
+                          ? 'bg-primary/10 text-primary font-bold border border-primary/20'
+                          : 'text-slate-800 hover:bg-slate-100 hover:text-primary',
+                      ].join(' ')}
+                      aria-current={pathname === '/login' ? 'page' : undefined}
+                    >
+                      <span className="flex items-center gap-3 text-base">
+                        <LogIn className="h-4 w-4 shrink-0 text-slate-400" aria-hidden="true" />
+                        Login
+                      </span>
+                      <ChevronRight
+                        className="h-4 w-4 shrink-0 text-slate-300"
+                        aria-hidden="true"
+                      />
+                    </Link>
+                  )}
+                  {pathname !== '/register' && (
+                    <Link
+                      href="/register"
+                      prefetch={true}
+                      onClick={closeMenu}
+                      className={[
+                        navItemBase,
+                        'justify-between w-full rounded-xl px-4 py-3.5 min-h-[48px]',
+                        pathname === '/register'
+                          ? 'bg-primary/10 text-primary font-bold border border-primary/20'
+                          : 'text-slate-800 hover:bg-slate-100 hover:text-primary',
+                      ].join(' ')}
+                      aria-current={pathname === '/register' ? 'page' : undefined}
+                    >
+                      <span className="flex items-center gap-3 text-base">
+                        <FilePlus className="h-4 w-4 shrink-0 text-slate-400" aria-hidden="true" />
+                        New Registration
+                      </span>
+                      <ChevronRight
+                        className="h-4 w-4 shrink-0 text-slate-300"
+                        aria-hidden="true"
+                      />
+                    </Link>
+                  )}
                 </>
               )}
 

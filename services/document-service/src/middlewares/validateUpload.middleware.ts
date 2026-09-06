@@ -19,6 +19,11 @@ export const validateUploadContentMiddleware = (req: Request, _res: Response, ne
     declaredMimeType: req.file.mimetype,
     originalName: req.file.originalname,
   })
-    .then(() => next())
+    .then((detected) => {
+      if (detected) {
+        req.file!.mimetype = detected;
+      }
+      next();
+    })
     .catch((err: unknown) => next(err));
 };
