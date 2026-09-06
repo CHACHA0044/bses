@@ -208,17 +208,17 @@ export const createApp = (): express.Application => {
       ];
       const message = messages[Math.floor(Math.random() * messages.length)];
 
-      // Log self-ping activity on every execution (or as configured by SELF_PING_LOG_EVERY).
-      const logEvery = Number(process.env.SELF_PING_LOG_EVERY) || 1;
-      if (pingHits === 1 || pingHits % logEvery === 0) {
+      // Log self-ping activity sparsely (every SELF_PING_LOG_EVERY pings — default
+      // every 3rd ping ≈ every ~9 min at the 3-min interval) to keep logs readable.
+      const logEvery = Number(process.env.SELF_PING_LOG_EVERY) || 3;
+      if (pingHits % logEvery === 0) {
         const elapsed = Date.now() - started;
         logger.info(
-          `[Self-Ping #${pingHits}] ${iterations} ops in ${elapsed}ms | CPU result: ${cpuSample.toFixed(2)} | RSS: ${Math.round(snapshot.rss / 1024 / 1024)}MB | Uptime: ${Math.round(snapshot.uptime)}s`,
+          `Self-ping #${pingHits}: ${iterations} ops in ${elapsed}ms (cpu ${cpuSample.toFixed(2)}, rss ${Math.round(snapshot.rss / 1024 / 1024)}MB)`,
           {
             iterations,
             cpuSample: cpuSample.toFixed(2),
             pingHits,
-            pid: snapshot.pid,
             uptime: Math.round(snapshot.uptime),
             rssMb: Math.round(snapshot.rss / 1024 / 1024),
             elapsedMs: elapsed,

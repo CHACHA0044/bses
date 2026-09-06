@@ -49,7 +49,7 @@ const installIpc = (): void => {
  * never crash the process (a failing keep-alive defeats its own purpose).
  */
 const installSelfPing = (port: number): NodeJS.Timeout => {
-  const intervalMs = Number(process.env.SELF_PING_INTERVAL_MS) || 60 * 1000; // 60s keep-alive interval
+  const intervalMs = Number(process.env.SELF_PING_INTERVAL_MS) || 180 * 1000; // 3 min keep-alive interval
   const url = `http://127.0.0.1:${port}/ping`;
 
   const ping = (): void => {
@@ -57,7 +57,7 @@ const installSelfPing = (port: number): NodeJS.Timeout => {
       .get(url, { timeout: 3000 }, (res) => {
         res.resume();
         res.on('end', () => {
-          logger.info('Gateway Self-Ping Keep-Alive OK', { url, status: res.statusCode });
+          logger.debug('Gateway Self-Ping Keep-Alive OK', { url, status: res.statusCode });
         });
       })
       .on('error', (err) => {

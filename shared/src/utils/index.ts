@@ -66,3 +66,4 @@ export const extractClientIp = (req: { headers: Record<string, any>; ip?: string
 
 export * from './document.util';
 export * from './encryption.util';
+export * from './pg.util';

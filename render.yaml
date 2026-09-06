@@ -63,6 +63,11 @@ services:
         value: '3012'
       - key: INTERNAL_PORT_NOTIFICATION
         value: '3013'
+      # Gateway keep-alive: self-ping every 3 min; log every 3rd ping
+      - key: SELF_PING_INTERVAL_MS
+        value: '180000'
+      - key: SELF_PING_LOG_EVERY
+        value: '3'
       # OCR pipeline (free tier ≈ 512 MB → single worker, bilingual Hindi+English)
       - key: OCR_WORKERS
         value: '1'

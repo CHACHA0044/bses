@@ -1,6 +1,6 @@
 import { PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
-import { createLogger } from '@bses/shared';
+import { createLogger, withPgSslMode } from '@bses/shared';
 import dns from 'node:dns';
 import { URL } from 'node:url';
 import type { PoolConfig } from 'pg';
@@ -116,7 +116,7 @@ const buildPoolConfig = (): PoolConfig => {
   try {
     parsed = new URL(raw);
   } catch {
-    return { connectionString: raw, ssl };
+    return { connectionString: withPgSslMode(raw), ssl };
   }
 
   const hostname = parsed.hostname;
@@ -127,7 +127,7 @@ const buildPoolConfig = (): PoolConfig => {
     hostname === '::1' ||
     hostname.endsWith('.local')
   ) {
-    return { connectionString: raw, ssl };
+    return { connectionString: withPgSslMode(raw), ssl };
   }
 
   const ipv4 = resolveIPv4(hostname);
@@ -144,7 +144,7 @@ const buildPoolConfig = (): PoolConfig => {
   }
 
   logger.warn(`IPv4 pre-resolve failed for ${hostname}; falling back to connection string`);
-  return { connectionString: raw, ssl };
+  return { connectionString: withPgSslMode(raw), ssl };
 };
 
 let prismaInstance: PrismaClient | null = null;

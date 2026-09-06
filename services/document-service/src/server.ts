@@ -10,6 +10,27 @@ const logger = createLogger({ service: 'document-service' });
 /** How often (ms) the boot recovery sweep re-scans for interrupted jobs. */
 const RECOVERY_INTERVAL_MS = 5 * 60 * 1000;
 
+/**
+ * Throttle repeated error logging: the first sweep failure logs at `error`,
+ * identical failures inside the window only log at `debug` so a persistent
+ * problem can't flood the log stream every 5 minutes.
+ */
+const createThrottledErrorLogger = (windowMs: number) => {
+  let lastMsg = '';
+  let lastAt = 0;
+  return (msg: string, meta: { error: unknown }): void => {
+    const now = Date.now();
+    const normalised = meta.error instanceof Error ? meta.error.message : String(meta.error);
+    if (now - lastAt > windowMs || normalised !== lastMsg) {
+      logger.error(msg, meta);
+      lastMsg = normalised;
+      lastAt = now;
+    } else {
+      logger.debug(`${msg} (repeated, suppressed)`, meta);
+    }
+  };
+};
+
 const start = async (): Promise<void> => {
   try {
     await connectMongoDB({
@@ -31,9 +52,10 @@ const start = async (): Promise<void> => {
   // Recover any OCR rows left PENDING, or PROCESSING by a previous process
   // (a crash/restart mid-job). Rows that already completed OCR pre-migration
   // (ocr_confidence set, ocr_status default PENDING) are not re-processed.
+  const logThrottledError = createThrottledErrorLogger(RECOVERY_INTERVAL_MS);
   const recoveryTimer = setInterval(() => {
     ocrService.recoverInterruptedJobs().catch((err) => {
-      logger.error('OCR recovery sweep failed', { error: err });
+      logThrottledError('OCR recovery sweep failed', { error: err });
     });
   }, RECOVERY_INTERVAL_MS);
   void ocrService
