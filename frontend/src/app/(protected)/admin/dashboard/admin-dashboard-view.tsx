@@ -17,7 +17,11 @@ import {
   Loader2,
   CalendarClock,
   UserCheck,
+  AlertCircle,
+  RefreshCw,
 } from 'lucide-react';
+import { ApiErrorBanner } from '@/components/common/ApiErrorBanner';
+import { Button } from '@/components/ui/Button';
 import type { AdminAnalytics } from '@/types/workflow';
 
 export interface AdminDashboardPayload {
@@ -27,7 +31,8 @@ export interface AdminDashboardPayload {
 export function AdminDashboardView() {
   // Data loads entirely client-side via the SWR cache. The PrefetchProvider
   // warms /admin/dashboard in the background so this usually renders instantly.
-  const { data, loading } = useApiResource<AdminDashboardPayload>('/admin/dashboard');
+  const { data, error, loading, revalidate } =
+    useApiResource<AdminDashboardPayload>('/admin/dashboard');
   const analytics = data?.analytics;
   const consumers = useMemo(() => analytics?.consumers || { totalActive: 0 }, [analytics]);
   const requests = useMemo(() => analytics?.connectionRequests || {}, [analytics]);
@@ -99,11 +104,30 @@ export function AdminDashboardView() {
         href: '/admin/connections',
       },
     ],
-    [consumers, officers, requests]
+    [consumers, officers, requests],
   );
 
   if (loading) {
     return <AdminDashboardSkeleton />;
+  }
+
+  // Show error state with retry option instead of crashing the entire page
+  if (error) {
+    return (
+      <div className="max-w-7xl mx-auto space-y-8 p-2">
+        <div>
+          <div className="inline-flex items-center gap-2 rounded-full bg-slate-900 px-3 py-1 text-xs font-semibold text-amber-400 mb-2">
+            <Shield className="w-3.5 h-3.5" />
+            <span>BSES Administration Portal</span>
+          </div>
+          <h1 className="text-2xl font-bold text-slate-900">Executive Overview & Analytics</h1>
+          <p className="text-xs text-slate-500 mt-1">
+            Live snapshot of consumers and connection applications.
+          </p>
+        </div>
+        <ApiErrorBanner error={error} onRetry={revalidate} title="Could not load dashboard data" />
+      </div>
+    );
   }
 
   return (
@@ -114,7 +138,9 @@ export function AdminDashboardView() {
           <span>BSES Administration Portal</span>
         </div>
         <h1 className="text-2xl font-bold text-slate-900">Executive Overview & Analytics</h1>
-        <p className="text-xs text-slate-500 mt-1">Live snapshot of consumers and connection applications.</p>
+        <p className="text-xs text-slate-500 mt-1">
+          Live snapshot of consumers and connection applications.
+        </p>
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-4">
@@ -138,7 +164,9 @@ export function AdminDashboardView() {
           <div className="flex items-center justify-between border-b border-slate-100 pb-3">
             <div>
               <h2 className="text-base font-bold text-slate-900">Monthly Registrations</h2>
-              <p className="text-xs text-slate-500">New consumer accounts created over the past 6 months</p>
+              <p className="text-xs text-slate-500">
+                New consumer accounts created over the past 6 months
+              </p>
             </div>
             <span className="text-xs font-bold text-amber-600 bg-amber-50 px-2.5 py-1 rounded-full border border-amber-200">
               Past 6 Months
@@ -191,13 +219,37 @@ export function AdminDashboardView() {
           </div>
 
           {(() => {
-            const dist = consumers.genderDistribution || { MALE: 0, FEMALE: 0, OTHER: 0, PREFER_NOT_TO_SAY: 0 };
-            const total = (dist.MALE || 0) + (dist.FEMALE || 0) + (dist.OTHER || 0) + (dist.PREFER_NOT_TO_SAY || 0);
+            const dist = consumers.genderDistribution || {
+              MALE: 0,
+              FEMALE: 0,
+              OTHER: 0,
+              PREFER_NOT_TO_SAY: 0,
+            };
+            const total =
+              (dist.MALE || 0) +
+              (dist.FEMALE || 0) +
+              (dist.OTHER || 0) +
+              (dist.PREFER_NOT_TO_SAY || 0);
             const items = [
               { label: 'Male', count: dist.MALE || 0, color: 'bg-blue-600', text: 'text-blue-600' },
-              { label: 'Female', count: dist.FEMALE || 0, color: 'bg-emerald-500', text: 'text-emerald-500' },
-              { label: 'Other', count: dist.OTHER || 0, color: 'bg-amber-500', text: 'text-amber-500' },
-              { label: 'Unspecified', count: dist.PREFER_NOT_TO_SAY || 0, color: 'bg-slate-400', text: 'text-slate-400' },
+              {
+                label: 'Female',
+                count: dist.FEMALE || 0,
+                color: 'bg-emerald-500',
+                text: 'text-emerald-500',
+              },
+              {
+                label: 'Other',
+                count: dist.OTHER || 0,
+                color: 'bg-amber-500',
+                text: 'text-amber-500',
+              },
+              {
+                label: 'Unspecified',
+                count: dist.PREFER_NOT_TO_SAY || 0,
+                color: 'bg-slate-400',
+                text: 'text-slate-400',
+              },
             ];
 
             return (
@@ -206,7 +258,11 @@ export function AdminDashboardView() {
                   {items.map((it) => {
                     const pct = total > 0 ? (it.count / total) * 100 : 0;
                     return pct > 0 ? (
-                      <div key={it.label} className={`${it.color} h-full transition-all`} style={{ width: `${pct}%` }} />
+                      <div
+                        key={it.label}
+                        className={`${it.color} h-full transition-all`}
+                        style={{ width: `${pct}%` }}
+                      />
                     ) : null;
                   })}
                 </div>
@@ -215,12 +271,17 @@ export function AdminDashboardView() {
                   {items.map((it) => {
                     const pct = total > 0 ? Math.round((it.count / total) * 100) : 0;
                     return (
-                      <div key={it.label} className="p-3 bg-slate-50 rounded-xl border border-slate-100 flex items-center justify-between">
+                      <div
+                        key={it.label}
+                        className="p-3 bg-slate-50 rounded-xl border border-slate-100 flex items-center justify-between"
+                      >
                         <div className="flex items-center gap-2">
                           <span className={`w-3 h-3 rounded-full ${it.color}`} />
                           <span className="font-semibold text-slate-700">{it.label}</span>
                         </div>
-                        <span className="font-bold text-slate-900">{it.count} ({pct}%)</span>
+                        <span className="font-bold text-slate-900">
+                          {it.count} ({pct}%)
+                        </span>
                       </div>
                     );
                   })}
@@ -260,10 +321,15 @@ export function AdminDashboardView() {
                     <div key={cat.key} className="space-y-1">
                       <div className="flex items-center justify-between text-xs">
                         <span className="font-semibold text-slate-700">{cat.label}</span>
-                        <span className="font-bold text-slate-900">{count} app(s) ({pct}%)</span>
+                        <span className="font-bold text-slate-900">
+                          {count} app(s) ({pct}%)
+                        </span>
                       </div>
                       <div className="h-2.5 w-full bg-slate-100 rounded-full overflow-hidden">
-                        <div className={`${cat.color} h-full transition-all duration-300`} style={{ width: `${Math.max(pct, count > 0 ? 3 : 0)}%` }} />
+                        <div
+                          className={`${cat.color} h-full transition-all duration-300`}
+                          style={{ width: `${Math.max(pct, count > 0 ? 3 : 0)}%` }}
+                        />
                       </div>
                     </div>
                   );
@@ -283,7 +349,9 @@ export function AdminDashboardView() {
             <h2 className="text-lg font-bold text-slate-900">Registered Consumer Directory</h2>
             <ArrowRight className="w-5 h-5 text-slate-400 group-hover:text-amber-500 group-hover:translate-x-0.5 transition-all" />
           </div>
-          <p className="text-xs text-slate-500">View, search, filter, and inspect registered consumers.</p>
+          <p className="text-xs text-slate-500">
+            View, search, filter, and inspect registered consumers.
+          </p>
         </Link>
 
         <Link
@@ -294,7 +362,9 @@ export function AdminDashboardView() {
             <h2 className="text-lg font-bold text-slate-900">Review Connection Requests</h2>
             <ArrowRight className="w-5 h-5 text-slate-400 group-hover:text-amber-500 group-hover:translate-x-0.5 transition-all" />
           </div>
-          <p className="text-xs text-slate-500">Approve, reject, or request additional documents for applications.</p>
+          <p className="text-xs text-slate-500">
+            Approve, reject, or request additional documents for applications.
+          </p>
         </Link>
       </div>
     </div>

@@ -25,6 +25,16 @@ const logger = createLogger({ service: 'gateway-ping' });
 /** In-process hit counter for the /ping keep-alive endpoint (replaces Redis INCR). */
 let pingHits = 0;
 
+/**
+ * Log self-ping activity at most once per SELF_PING_LOG_EVERY_MINUTES based on
+ * process uptime — NOT the in-memory hit counter. The counter is a boot-local
+ * signal, so throttling by it makes logs reset to "#3" after every deploy and
+ * depend on how many processes/instances exist. Uptime-based throttling is
+ * restart-proof: at most 1 INFO line per window regardless of process churn.
+ */
+const PING_LOG_EVERY_MINUTES_DEFAULT = 60;
+let lastPingLogUptimeMin = -1;
+
 export const createApp = (): express.Application => {
   const app = express();
 

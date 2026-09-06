@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -10,7 +10,16 @@ import { Alert } from '@/components/ui/Alert';
 import { AlertSlot } from '@/components/ui/AlertSlot';
 import { validateDocumentFile, uploadGuidanceText, ACCEPT_ATTR } from '@/lib/documentUpload';
 import { LocationPickerModal } from '@/components/common/LocationPickerModal';
-import { CheckCircle2, ArrowRight, ArrowLeft, Upload, FileText, AlertCircle, Loader2, MapPin } from 'lucide-react';
+import {
+  CheckCircle2,
+  ArrowRight,
+  ArrowLeft,
+  Upload,
+  FileText,
+  AlertCircle,
+  Loader2,
+  MapPin,
+} from 'lucide-react';
 
 const wizardSchema = z.object({
   connectionType: z.enum(['DOMESTIC', 'COMMERCIAL', 'INDUSTRIAL', 'AGRICULTURAL']),
@@ -30,6 +39,13 @@ export default function ApplyConnectionPage() {
   const [optimizingFile, setOptimizingFile] = useState(false);
   const [uploadedDocs, setUploadedDocs] = useState<any[]>([]);
   const [isMapOpen, setIsMapOpen] = useState(false);
+  // Local submit guard. `isSubmitting` from react-hook-form can flicker if a
+  // validation check fires after submission starts; this ref guarantees that
+  // even if the user double-clicks Submit, the network call is fired ONCE.
+  const submittingRef = useRef(false);
+  // Last server-side attempt id — lets the frontend tell the backend "this is
+  // the same submission" so retries become idempotent at the API layer too.
+  const submitAttemptIdRef = useRef<string>('');
 
   const {
     register,
@@ -56,7 +72,9 @@ export default function ApplyConnectionPage() {
     if (isValid) {
       setStep(2);
     } else {
-      setServerError('Please enter your complete property address (at least 10 characters) before continuing.');
+      setServerError(
+        'Please enter your complete property address (at least 10 characters) before continuing.',
+      );
     }
   };
 
@@ -66,7 +84,9 @@ export default function ApplyConnectionPage() {
     if (isValid) {
       setStep(3);
     } else {
-      setServerError('Please specify a valid connection category and load requirement (greater than 0 kW).');
+      setServerError(
+        'Please specify a valid connection category and load requirement (greater than 0 kW).',
+      );
     }
   };
 
@@ -90,7 +110,9 @@ export default function ApplyConnectionPage() {
       // guidance so a bad file never wastes an OCR cycle.
       const check = await validateDocumentFile(uploadFile);
       if (!check.ok) {
-        setUploadError(check.errors[0] ?? 'This file cannot be uploaded. Please try a different file.');
+        setUploadError(
+          check.errors[0] ?? 'This file cannot be uploaded. Please try a different file.',
+        );
         setUploadWarning(null);
         e.target.value = '';
         return;
@@ -133,26 +155,40 @@ export default function ApplyConnectionPage() {
   };
 
   const onSubmit = async (data: WizardFormData) => {
+    // Guard against double-submission using a ref (more reliable than isSubmitting
+    // which can flicker if validation fires after submission starts)
+    if (submittingRef.current) {
+      return;
+    }
+    submittingRef.current = true;
     setServerError(null);
     try {
       const res = await apiClient.post('/connections/apply', {
         ...data,
         isDraft: false,
         documentIds: uploadedDocs.map((doc) => doc.id),
+        submitAttemptId: submitAttemptIdRef.current,
       });
       if (res.data.success) {
         router.push(`/connections/${res.data.data.connection.id}`);
       }
     } catch (err: any) {
-      setServerError(err.response?.data?.error?.message || 'Failed to submit application.');
+      // Preserve user's data on failure - do NOT clear form state
+      setServerError(err.response?.data?.error?.message || 'Failed to submit application. Your data has been preserved.');
+    } finally {
+      submittingRef.current = false;
     }
   };
 
   return (
     <div className="max-w-3xl mx-auto space-y-4 sm:space-y-6 px-1 sm:px-4 py-2 sm:py-4">
       <div>
-        <h1 className="text-xl sm:text-2xl font-bold text-slate-900 leading-tight">New Electricity Connection Application</h1>
-        <p className="text-xs text-slate-500 mt-0.5">Multi-step online service request wizard for BSES Delhi consumers</p>
+        <h1 className="text-xl sm:text-2xl font-bold text-slate-900 leading-tight">
+          New Electricity Connection Application
+        </h1>
+        <p className="text-xs text-slate-500 mt-0.5">
+          Multi-step online service request wizard for BSES Delhi consumers
+        </p>
       </div>
 
       {/* Wizard Progress Bar with Animated Moving Arrows */}
@@ -181,8 +217,8 @@ export default function ApplyConnectionPage() {
                       isActive
                         ? 'bg-amber-500 text-slate-950 ring-4 ring-amber-500/20 shadow-md scale-105'
                         : isCompleted
-                        ? 'bg-emerald-500 text-white shadow-sm'
-                        : 'bg-slate-200 text-slate-500'
+                          ? 'bg-emerald-500 text-white shadow-sm'
+                          : 'bg-slate-200 text-slate-500'
                     }`}
                   >
                     {isCompleted ? <CheckCircle2 className="w-4 h-4 text-white" /> : s.num}
@@ -192,8 +228,8 @@ export default function ApplyConnectionPage() {
                       isActive
                         ? 'text-amber-600 font-extrabold'
                         : isCompleted
-                        ? 'text-emerald-700 font-semibold'
-                        : 'text-slate-500'
+                          ? 'text-emerald-700 font-semibold'
+                          : 'text-slate-500'
                     }`}
                   >
                     {s.label}
@@ -214,8 +250,8 @@ export default function ApplyConnectionPage() {
                           step === s.num
                             ? 'border-amber-400 text-amber-600 shadow-md animate-bounce-horizontal scale-110 z-10'
                             : step > s.num
-                            ? 'border-emerald-400 text-emerald-500 bg-emerald-50'
-                            : 'border-slate-200 text-slate-300'
+                              ? 'border-emerald-400 text-emerald-500 bg-emerald-50'
+                              : 'border-slate-200 text-slate-300'
                         }`}
                       >
                         <ArrowRight className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
@@ -259,13 +295,20 @@ export default function ApplyConnectionPage() {
         )}
       </AlertSlot>
 
-      <form onSubmit={handleSubmit(onSubmit)} className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 sm:p-6 space-y-5 sm:space-y-6">
+      <form
+        onSubmit={handleSubmit(onSubmit)}
+        className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 sm:p-6 space-y-5 sm:space-y-6"
+      >
         {step === 1 && (
           <div className="space-y-4">
-            <h2 className="text-xs sm:text-sm font-bold text-slate-800 uppercase tracking-wide">Step 1: Property Location</h2>
+            <h2 className="text-xs sm:text-sm font-bold text-slate-800 uppercase tracking-wide">
+              Step 1: Property Location
+            </h2>
             <div>
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 mb-2">
-                <label className="block text-xs font-semibold text-slate-700 uppercase">Full Property Address *</label>
+                <label className="block text-xs font-semibold text-slate-700 uppercase">
+                  Full Property Address *
+                </label>
                 <button
                   type="button"
                   onClick={() => setIsMapOpen(true)}
@@ -285,13 +328,20 @@ export default function ApplyConnectionPage() {
                 }`}
                 placeholder="Flat No, Building Name, Street Name, Landmark, Pin Code, Delhi"
               />
-              {errors.propertyAddress && <p className="text-xs font-semibold text-red-500 mt-1.5 flex items-center gap-1"><AlertCircle className="w-3.5 h-3.5" />{errors.propertyAddress.message}</p>}
+              {errors.propertyAddress && (
+                <p className="text-xs font-semibold text-red-500 mt-1.5 flex items-center gap-1">
+                  <AlertCircle className="w-3.5 h-3.5" />
+                  {errors.propertyAddress.message}
+                </p>
+              )}
             </div>
 
             <LocationPickerModal
               isOpen={isMapOpen}
               onClose={() => setIsMapOpen(false)}
-              onSelectAddress={(addr) => setValue('propertyAddress', addr, { shouldValidate: true })}
+              onSelectAddress={(addr) =>
+                setValue('propertyAddress', addr, { shouldValidate: true })
+              }
               initialAddress={propertyAddressVal}
             />
 
@@ -310,11 +360,18 @@ export default function ApplyConnectionPage() {
 
         {step === 2 && (
           <div className="space-y-4">
-            <h2 className="text-xs sm:text-sm font-bold text-slate-800 uppercase tracking-wide">Step 2: Connection Type & Required Load</h2>
+            <h2 className="text-xs sm:text-sm font-bold text-slate-800 uppercase tracking-wide">
+              Step 2: Connection Type & Required Load
+            </h2>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <label className="block text-xs font-semibold text-slate-700 uppercase mb-1">Connection Category *</label>
-                <select {...register('connectionType')} className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs sm:text-sm text-slate-900">
+                <label className="block text-xs font-semibold text-slate-700 uppercase mb-1">
+                  Connection Category *
+                </label>
+                <select
+                  {...register('connectionType')}
+                  className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs sm:text-sm text-slate-900"
+                >
                   <option value="DOMESTIC">Domestic Connection</option>
                   <option value="COMMERCIAL">Commercial Connection</option>
                   <option value="INDUSTRIAL">Industrial Connection</option>
@@ -323,16 +380,25 @@ export default function ApplyConnectionPage() {
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-700 uppercase mb-1">Required Load (kW) *</label>
+                <label className="block text-xs font-semibold text-slate-700 uppercase mb-1">
+                  Required Load (kW) *
+                </label>
                 <input
                   {...register('requiredLoad')}
                   type="number"
                   step="0.5"
                   className={`w-full bg-slate-50 border rounded-xl p-2.5 text-xs sm:text-sm text-slate-900 focus:outline-none transition ${
-                    errors.requiredLoad ? 'border-red-500 ring-2 ring-red-500/20' : 'border-slate-300 focus:border-amber-500'
+                    errors.requiredLoad
+                      ? 'border-red-500 ring-2 ring-red-500/20'
+                      : 'border-slate-300 focus:border-amber-500'
                   }`}
                 />
-                {errors.requiredLoad && <p className="text-xs font-semibold text-red-500 mt-1 flex items-center gap-1"><AlertCircle className="w-3.5 h-3.5" />{errors.requiredLoad.message}</p>}
+                {errors.requiredLoad && (
+                  <p className="text-xs font-semibold text-red-500 mt-1 flex items-center gap-1">
+                    <AlertCircle className="w-3.5 h-3.5" />
+                    {errors.requiredLoad.message}
+                  </p>
+                )}
               </div>
             </div>
 
@@ -358,26 +424,39 @@ export default function ApplyConnectionPage() {
 
         {step === 3 && (
           <div className="space-y-4">
-            <h2 className="text-xs sm:text-sm font-bold text-slate-800 uppercase tracking-wide">Step 3: Upload Mandatory Supporting Documents</h2>
+            <h2 className="text-xs sm:text-sm font-bold text-slate-800 uppercase tracking-wide">
+              Step 3: Upload Mandatory Supporting Documents
+            </h2>
             <p className="text-xs text-slate-500 leading-relaxed">{uploadGuidanceText()}</p>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
               <div className="p-3.5 sm:p-4 border border-dashed border-slate-300 rounded-xl space-y-2 text-center bg-slate-50/50 hover:bg-slate-50 transition">
                 <Upload className="w-6 h-6 text-slate-400 mx-auto" />
                 <p className="text-xs font-bold text-slate-700">Identity Proof (Aadhaar / PAN)</p>
-                <input type="file" accept={ACCEPT_ATTR} onChange={(e) => handleFileUpload(e, 'AADHAAR_CARD')} className="w-full text-xs text-slate-500 file:mr-2 file:py-1 file:px-2.5 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-amber-100 file:text-amber-800 hover:file:bg-amber-200 cursor-pointer" />
+                <input
+                  type="file"
+                  accept={ACCEPT_ATTR}
+                  onChange={(e) => handleFileUpload(e, 'AADHAAR_CARD')}
+                  className="w-full text-xs text-slate-500 file:mr-2 file:py-1 file:px-2.5 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-amber-100 file:text-amber-800 hover:file:bg-amber-200 cursor-pointer"
+                />
               </div>
 
               <div className="p-3.5 sm:p-4 border border-dashed border-slate-300 rounded-xl space-y-2 text-center bg-slate-50/50 hover:bg-slate-50 transition">
                 <Upload className="w-6 h-6 text-slate-400 mx-auto" />
                 <p className="text-xs font-bold text-slate-700">Ownership / Lease Proof</p>
-                <input type="file" accept={ACCEPT_ATTR} onChange={(e) => handleFileUpload(e, 'OWNERSHIP_PROOF')} className="w-full text-xs text-slate-500 file:mr-2 file:py-1 file:px-2.5 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-amber-100 file:text-amber-800 hover:file:bg-amber-200 cursor-pointer" />
+                <input
+                  type="file"
+                  accept={ACCEPT_ATTR}
+                  onChange={(e) => handleFileUpload(e, 'OWNERSHIP_PROOF')}
+                  className="w-full text-xs text-slate-500 file:mr-2 file:py-1 file:px-2.5 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-amber-100 file:text-amber-800 hover:file:bg-amber-200 cursor-pointer"
+                />
               </div>
             </div>
 
             {optimizingFile && (
               <p className="flex items-center gap-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
-                <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" /> Optimizing image… large photos are compressed in your browser before upload.
+                <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" /> Optimizing image… large
+                photos are compressed in your browser before upload.
               </p>
             )}
 
@@ -387,7 +466,9 @@ export default function ApplyConnectionPage() {
                 {uploadedDocs.map((doc, idx) => (
                   <p key={idx} className="flex items-center gap-1">
                     <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                    <span>{doc.documentName} ({doc.documentType})</span>
+                    <span>
+                      {doc.documentName} ({doc.documentType})
+                    </span>
                   </p>
                 ))}
               </div>
@@ -415,7 +496,9 @@ export default function ApplyConnectionPage() {
 
         {step === 4 && (
           <div className="space-y-4">
-            <h2 className="text-xs sm:text-sm font-bold text-slate-800 uppercase tracking-wide">Step 4: Application Summary Review</h2>
+            <h2 className="text-xs sm:text-sm font-bold text-slate-800 uppercase tracking-wide">
+              Step 4: Application Summary Review
+            </h2>
             <div className="bg-slate-50 p-3.5 sm:p-4 rounded-xl border border-slate-200 text-xs space-y-2 text-slate-700">
               <p>
                 <span className="font-bold">Connection Type:</span> {connectionTypeVal}

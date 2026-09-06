@@ -2,12 +2,25 @@ import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from './useAuth';
 
-/** Safe `next` return path — internal paths only, never protocol-relative. */
-export function getSafeReturnPath(): string | null {
+/** ADMIN-only path prefixes — never sent to a CONSUMER role. */
+const ADMIN_ONLY_PREFIXES = ['/admin'];
+/** Paths that are consumer-specific — never sent to an ADMIN. */
+const CONSUMER_ONLY_PREFIXES = ['/connections/apply', '/dashboard', '/profile', '/settings'];
+
+const ADMIN_ROLES = ['ADMIN', 'SUPER_ADMIN'];
+
+/** Safe `next` return path — internal paths only, never protocol-relative,
+ * AND validated against the user's role so an admin is never sent to a
+ * consumer-only page and vice versa. */
+export function getSafeReturnPath(role?: string): string | null {
   if (typeof window === 'undefined') return null;
   const next = new URLSearchParams(window.location.search).get('next');
   if (!next) return null;
   if (next.startsWith('//') || next.startsWith('/login') || !next.startsWith('/')) return null;
+  const isAdmin = role && ADMIN_ROLES.includes(role);
+  // Block cross-role redirects: admins → consumer pages, consumers → admin pages
+  if (isAdmin && CONSUMER_ONLY_PREFIXES.some((p) => next.startsWith(p))) return null;
+  if (!isAdmin && ADMIN_ONLY_PREFIXES.some((p) => next.startsWith(p))) return null;
   return next;
 }
 
@@ -31,17 +44,37 @@ export const useAuthRedirect = (fallbackHref?: string) => {
 
   useEffect(() => {
     if (isLoading || !isAuthenticated) return;
-    const dest = getSafeReturnPath() ?? fallbackHref ?? roleDashboard(user?.role);
+    const dest = getSafeReturnPath(user?.role) ?? fallbackHref ?? roleDashboard(user?.role);
     // [AUTH_REDIRECT] trace so we can see in the browser console which path
     // the auth pages send us to and whether middleware later accepts it.
     // eslint-disable-next-line no-console
-    console.log('[AUTH_REDIRECT] step=redirecting isAuthenticated=', isAuthenticated, 'role=', user?.role, 'dest=', dest, 'fallbackHref=', fallbackHref, 't=', new Date().toISOString());
+    console.log(
+      '[AUTH_REDIRECT] step=redirecting isAuthenticated=',
+      isAuthenticated,
+      'role=',
+      user?.role,
+      'dest=',
+      dest,
+      'fallbackHref=',
+      fallbackHref,
+      't=',
+      new Date().toISOString(),
+    );
     router.replace(dest);
   }, [isLoading, isAuthenticated, user, router, fallbackHref]);
 
   useEffect(() => {
     // eslint-disable-next-line no-console
-    console.log('[AUTH_REDIRECT] step=state isLoading=', isLoading, 'isAuthenticated=', isAuthenticated, 'role=', user?.role, 't=', new Date().toISOString());
+    console.log(
+      '[AUTH_REDIRECT] step=state isLoading=',
+      isLoading,
+      'isAuthenticated=',
+      isAuthenticated,
+      'role=',
+      user?.role,
+      't=',
+      new Date().toISOString(),
+    );
   }, [isLoading, isAuthenticated, user]);
 
   // Fail-safe: if the session check hangs (network unreachable, gateway 5xx,

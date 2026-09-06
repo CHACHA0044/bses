@@ -4,6 +4,7 @@ import React, { useState } from 'react';
 import Link from 'next/link';
 import { useApiResource } from '@/hooks/useApiResource';
 import { TableSkeleton } from '@/components/ui/Skeleton';
+import { ApiErrorBanner } from '@/components/common/ApiErrorBanner';
 import { Button } from '@/components/ui/Button';
 import { PrefetchLink } from '@/components/ui/PrefetchLink';
 import { StatusChip } from '@/components/ui/Badge';
@@ -42,8 +43,11 @@ export function AdminConnectionsView() {
   // Default state matches the idle-prefetch URL so navigation is instant
   // when data has been warmed by the PrefetchProvider.
   const url =
-    status || page > 1 ? `/admin/connection-requests?${query.toString()}` : '/admin/connection-requests';
-  const { data, loading, isValidating } = useApiResource<AdminConnectionsPayload>(url);
+    status || page > 1
+      ? `/admin/connection-requests?${query.toString()}`
+      : '/admin/connection-requests';
+  const { data, error, loading, isValidating, revalidate } =
+    useApiResource<AdminConnectionsPayload>(url);
   const requests = data?.requests ?? [];
   const totalPages = data?.totalPages ?? 1;
 
@@ -54,11 +58,14 @@ export function AdminConnectionsView() {
 
   return (
     <div className="max-w-7xl mx-auto space-y-6 p-2">
+      {error && !loading ? <ApiErrorBanner error={error} onRetry={revalidate} /> : null}
+
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Electricity Connection Applications</h1>
           <p className="text-xs text-slate-500">
-            {data ? `${data.total} application(s)` : 'Manage'} · every change routes through the workflow engine
+            {data ? `${data.total} application(s)` : 'Manage'} · every change routes through the
+            workflow engine
           </p>
         </div>
         <div className="text-xs font-semibold text-slate-400">
@@ -106,7 +113,9 @@ export function AdminConnectionsView() {
                   const assignee = (r.assignments ?? []).find((a) => a.status === 'ACTIVE');
                   return (
                     <tr key={r.id} className="hover:bg-slate-50 transition">
-                      <td className="p-3 font-semibold text-slate-900 whitespace-nowrap">{r.applicationNumber}</td>
+                      <td className="p-3 font-semibold text-slate-900 whitespace-nowrap">
+                        {r.applicationNumber}
+                      </td>
                       <td className="p-3 whitespace-nowrap">
                         <p className="font-semibold text-slate-800">
                           {r.user?.firstName} {r.user?.lastName}

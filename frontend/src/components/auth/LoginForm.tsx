@@ -147,7 +147,9 @@ export const LoginForm: React.FC = () => {
         setIsRedirecting(true);
         setUser(res.data.data.user);
         const role = res.data.data.user.role;
-        const dest = getSafeReturnPath() ?? roleDashboard(role);
+        // Use role-aware return-path validation so an admin is NEVER sent to a
+        // consumer-only page (e.g. /connections/apply) when ?next= is stale.
+        const dest = getSafeReturnPath(role) ?? roleDashboard(role);
         // [LOGIN_FLOW] step=redirecting
         // eslint-disable-next-line no-console
         console.log(

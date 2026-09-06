@@ -4,6 +4,7 @@ import React, { useState } from 'react';
 import { useApiResource } from '@/hooks/useApiResource';
 import { PrefetchLink } from '@/components/ui/PrefetchLink';
 import { TableSkeleton } from '@/components/ui/Skeleton';
+import { ApiErrorBanner } from '@/components/common/ApiErrorBanner';
 import { Search, Users } from 'lucide-react';
 
 interface AdminUsersPayload {
@@ -19,13 +20,14 @@ export function AdminUsersView() {
   // The default URL (`?search=`) matches the idle PrefetchProvider, so the
   // directory renders instantly from cache on first load.
   const url = `/admin/users?search=${encodeURIComponent(committedSearch)}`;
-  const { data, loading } = useApiResource<AdminUsersPayload>(url);
+  const { data, error, loading, revalidate } = useApiResource<AdminUsersPayload>(url);
   const users = data?.users || [];
 
   const runSearch = () => setCommittedSearch(search.trim());
 
   return (
     <div className="max-w-7xl mx-auto space-y-6 p-2">
+      {error && !loading ? <ApiErrorBanner error={error} onRetry={revalidate} /> : null}
       <div>
         <h1 className="text-2xl font-bold text-slate-900">Consumer Directory</h1>
         <p className="text-xs text-slate-500">Search and manage registered BSES Delhi consumers</p>
