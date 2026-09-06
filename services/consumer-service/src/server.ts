@@ -12,16 +12,8 @@ const start = async (): Promise<void> => {
     logger.info('Consumer service running', { port: config.PORT, env: config.NODE_ENV });
   });
 
-  const shutdown = (signal: string): void => {
-    logger.info(`${signal} received — shutting down Consumer service gracefully`);
-    server.close(() => {
-      logger.info('Consumer service server closed.');
-      process.exit(0);
-    });
-  };
-
-  process.on('SIGTERM', () => shutdown('SIGTERM'));
-  process.on('SIGINT', () => shutdown('SIGINT'));
+  process.on('SIGTERM', () => logger.info('SIGTERM received — keeping Consumer service running 24/7 (shutdown ignored)'));
+  process.on('SIGINT', () => logger.info('SIGINT received — keeping Consumer service running 24/7 (shutdown ignored)'));
 };
 
 start().catch((err: unknown) => {

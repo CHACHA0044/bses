@@ -49,28 +49,27 @@ const installIpc = (): void => {
  * never crash the process (a failing keep-alive defeats its own purpose).
  */
 const installSelfPing = (port: number): NodeJS.Timeout => {
-  const intervalMs = Number(process.env.SELF_PING_INTERVAL_MS) || 3 * 60 * 1000; // 3 min default
+  const intervalMs = Number(process.env.SELF_PING_INTERVAL_MS) || 60 * 1000; // 60s keep-alive interval
   const url = `http://127.0.0.1:${port}/ping`;
 
   const ping = (): void => {
     const req = http
-      .get(url, { timeout: 2000 }, (res) => {
+      .get(url, { timeout: 3000 }, (res) => {
         res.resume();
         res.on('end', () => {
-          logger.debug('Self-ping OK', { url, status: res.statusCode });
+          logger.info('Gateway Self-Ping Keep-Alive OK', { url, status: res.statusCode });
         });
       })
       .on('error', (err) => {
-        logger.debug('Self-ping failed (non-fatal)', { url, error: err.message });
+        logger.warn('Self-ping failed (non-fatal)', { url, error: err.message });
       })
       .on('timeout', () => {
-        logger.debug('Self-ping timed out (non-fatal)', { url });
+        logger.warn('Self-ping timed out (non-fatal)', { url });
         req.destroy();
       });
   };
 
-  // Fire the first ping shortly after the server is listening so we don't wait
-  // a full interval before the first keep-alive signal.
+  // Fire the first ping shortly after the server is listening
   setTimeout(ping, 1000);
   logger.info('Self-ping keep-alive installed', { url, intervalMs });
   return setInterval(ping, intervalMs);
@@ -86,17 +85,8 @@ const start = async (): Promise<void> => {
 
   const selfPingTimer = installSelfPing(config.PORT);
 
-  const shutdown = (signal: string): void => {
-    logger.info(`${signal} received — shutting down gracefully`);
-    clearInterval(selfPingTimer);
-    server.close(() => {
-      logger.info('Gateway closed');
-      process.exit(0);
-    });
-  };
-
-  process.on('SIGTERM', () => shutdown('SIGTERM'));
-  process.on('SIGINT', () => shutdown('SIGINT'));
+  process.on('SIGTERM', () => logger.info('SIGTERM received — keeping Gateway running 24/7 (shutdown ignored)'));
+  process.on('SIGINT', () => logger.info('SIGINT received — keeping Gateway running 24/7 (shutdown ignored)'));
 };
 
 start().catch((err: unknown) => {

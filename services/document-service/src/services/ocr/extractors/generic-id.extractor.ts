@@ -25,7 +25,9 @@ const DOB_RE =
   /(?:Date\s*of\s*Birth|DOB)\s*:?\s*(\d{2}[/\-\.]\d{2}[/\-\.]\d{4})/i;
 const ADDRESS_RE =
   /(?:Address|Residential Address|Permanent Address|Correspondence Address)\s*:?\s*(.+)/i;
-const AADHAAR_RE = /(?<!\d)(\d{4}[\s-]\d{4}[\s-]\d{4}|\d{12})(?!\d)/;
+// Separators must not span newlines — otherwise the DOB year on its own line
+// can bleed into an Aadhaar number (e.g. `1990\n1234 5678 9012`).
+const AADHAAR_RE = /(?<!\d)(\d{4}[ \t-]\d{4}[ \t-]\d{4}|\d{12})(?!\d)/;
 const PAN_RE = /\b([A-Z]{5}\d{4}[A-Z])\b/;
 const LICENCE_RE = /\b([A-Z]{2}[\s\-]?\d{2}[\s\-]?\d{4}[\s\-]?\d{5,7})\b/;
 const VALIDITY_RE =

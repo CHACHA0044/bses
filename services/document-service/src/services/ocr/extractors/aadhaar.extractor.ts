@@ -32,8 +32,10 @@ const AADHAAR_DETECT_RE =
 // ── Field-specific patterns ─────────────────────────────────────────────────
 
 // Masked Aadhaar: XXXX XXXX 8299 or xxxx xxxx 1234 or full 12-digit
-const MASKED_AADHAAR_RE = /(?:X{4}[\s-]?X{4}[\s-]?\d{4})/i;
-const FULL_AADHAAR_RE = /(?<!\d)(\d{4}[\s-]\d{4}[\s-]\d{4}|\d{12})(?!\d)/;
+const MASKED_AADHAAR_RE = /(?:X{4}[ \t-]?X{4}[ \t-]?\d{4})/i;
+// Separators must not span newlines — otherwise the DOB year on its own line
+// can bleed into an Aadhaar number (e.g. `1990\n1234 5678 9012`).
+const FULL_AADHAAR_RE = /(?<!\d)(\d{4}[ \t-]\d{4}[ \t-]\d{4}|\d{12})(?!\d)/;
 
 // DOB with label: English or Hindi
 const DOB_LABEL_RE =
@@ -96,11 +98,15 @@ export class AadhaarExtractor implements DocumentExtractor {
         source: 'regex',
       };
     } else if (fullMatch) {
-      // Mask for display safety: show only last 4 digits
+      // A fully-printed 12-digit Aadhaar is stored in its COMPLETE form. The
+      // physical card itself (not OCR) may still print a masked value (dealt
+      // with by MASKED_AADHAAR_RE above). Masking for display safety is an API
+      // boundary concern (see `toDocumentView` in @bses/shared), NOT storage:
+      // persisting only the last 4 digits is irreversible data loss for any
+      // Aadhaar card without a decodable QR code.
       const raw = fullMatch[0].replace(/[\s-]/g, '');
-      const masked = `XXXX XXXX ${raw.slice(-4)}`;
       fields.extractedAadhaar = {
-        value: masked,
+        value: raw,
         confidence: fieldConfidence({ labelMatched: false, formatValid: raw.length === 12, rawConfidence: conf }),
         source: 'regex',
       };

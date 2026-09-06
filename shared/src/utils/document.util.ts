@@ -1,6 +1,18 @@
 import { encryptionService } from './encryption.util';
 
-export type OcrStatus = 'PROCESSING' | 'EXTRACTED' | 'UNREADABLE' | 'NEEDS_REVIEW';
+/**
+ * OcrStatus — the durable, database-backed OCR pipeline state surfaced to callers.
+ * - PENDING    uploaded, awaiting a processing slot
+ * - PROCESSING currently running
+ * - EXTRACTED  OCR succeeded; every expected field is present
+ * - PARTIAL    OCR succeeded but only some expected fields were recovered
+ * - NEEDS_REVIEW some/extracted values are low-confidence and must be verified
+ * - UNREADABLE document could not be read (document-quality failure)
+ * - FAILED     OCR infrastructure failed after bounded retries (NOT a quality verdict)
+ */
+export type OcrStatus = 'PENDING' | 'PROCESSING' | 'EXTRACTED' | 'PARTIAL' | 'NEEDS_REVIEW' | 'UNREADABLE' | 'FAILED';
+
+export type OcrJobStatusValue = OcrStatus;
 
 /** Prisma `Decimal` carries `toString()` — accepted structurally to avoid a Prisma import. */
 export interface DecimalLike {
@@ -42,6 +54,18 @@ export interface RawDocument {
   ocrRawTextEncrypted?: string | null;
   needsReview?: boolean | null;
   ocrLowConfidenceFields?: unknown | null;
+  // ── Durable job state ──
+  ocrStatus?: string | null;
+  ocrAttempts?: number | null;
+  ocrStartedAt?: Date | string | null;
+  ocrCompletedAt?: Date | string | null;
+  ocrNextAttemptAt?: Date | string | null;
+  ocrLastError?: string | null;
+  ocrDetectedType?: string | null;
+  ocrLanguages?: string | null;
+  ocrPageResults?: unknown | null;
+  ocrFieldDetails?: unknown | null;
+  ocrMetrics?: unknown | null;
 }
 
 export interface DocumentOcrData {
@@ -85,6 +109,17 @@ export interface DocumentView {
   /** Field keys (e.g. `extractedDob`) whose value was flagged as a likely misread. */
   ocrLowConfidenceFields: string[];
   ocrData: DocumentOcrData;
+  /** Number of OCR processing attempts so far (durable job state). */
+  ocrAttempts: number;
+  /** Physical document type detected by the extractor registry (e.g. "Aadhaar"). */
+  ocrDetectedType: string | null;
+  /** Engine languages used for this run (e.g. "eng", "eng+hin"). */
+  ocrLanguages: string | null;
+  // ── Admin-only diagnostics (present only when includeRawText is true) ──
+  ocrLastError?: string | null;
+  ocrPageResults?: unknown | null;
+  ocrFieldDetails?: unknown | null;
+  ocrMetrics?: unknown | null;
 }
 
 /** Last 4 digits only — `•••• •••• 1234`. */
@@ -144,11 +179,34 @@ const decryptField = (ciphertext: string | null | undefined): string | null => {
   }
 };
 
+const TERMINAL_OCR_STATUSES: ReadonlySet<string> = new Set([
+  'EXTRACTED',
+  'PARTIAL',
+  'NEEDS_REVIEW',
+  'UNREADABLE',
+  'FAILED',
+]);
+
+/**
+ * Resolves the view-level OCR state.
+ *
+ * The durable `ocrStatus` column is the source of truth once a job has begun
+ * (PROCESSING and every terminal state). Two legacy cases fall back to the
+ * derived flags:
+ *   - rows migrated from the old schema keep the enum's DEFAULT `PENDING`
+ *     until a new run touches them, and
+ *   - any row that was processed before the job-state migration has only
+ *     `ocr_confidence`/`needsReview`/`isUnreadable` to describe its outcome.
+ */
 const toOcrStatus = (
   isUnreadable: boolean,
   ocrConfidence: number | null,
   needsReview: boolean,
+  dbOcrStatus: string | null | undefined,
 ): OcrStatus => {
+  if (dbOcrStatus && (dbOcrStatus === 'PROCESSING' || TERMINAL_OCR_STATUSES.has(dbOcrStatus))) {
+    return dbOcrStatus as OcrStatus;
+  }
   if (isUnreadable) return 'UNREADABLE';
   if (needsReview && ocrConfidence !== null) return 'NEEDS_REVIEW';
   if (ocrConfidence !== null) return 'EXTRACTED';
@@ -250,10 +308,21 @@ export const toDocumentView = (
     connectionRequestId: doc.connectionRequestId ?? null,
     isUnreadable: doc.isUnreadable === true,
     ocrConfidence,
-    ocrStatus: toOcrStatus(doc.isUnreadable === true, ocrConfidence, needsReview),
+    ocrStatus: toOcrStatus(doc.isUnreadable === true, ocrConfidence, needsReview, doc.ocrStatus),
     needsReview,
     ocrLowConfidenceFields,
     ocrData,
+    ocrAttempts: doc.ocrAttempts ?? 0,
+    ocrDetectedType: doc.ocrDetectedType ?? null,
+    ocrLanguages: doc.ocrLanguages ?? null,
+    ...(includeRawText
+      ? {
+          ocrLastError: doc.ocrLastError ?? null,
+          ocrPageResults: doc.ocrPageResults ?? null,
+          ocrFieldDetails: doc.ocrFieldDetails ?? null,
+          ocrMetrics: doc.ocrMetrics ?? null,
+        }
+      : {}),
   };
 };
 

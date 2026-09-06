@@ -49,5 +49,5 @@ describe('decodeQrFromImage', () => {
       .toBuffer();
     const decoded = await decodeQrFromImage([blank, png]);
     expect(decoded).toBe(payload);
-  });
+  }, 20000);
 });

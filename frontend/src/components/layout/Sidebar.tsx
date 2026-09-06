@@ -2,7 +2,7 @@
 
 import React, { useLayoutEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { useAuth } from '@/hooks/useAuth';
 import { navItemBase, pressedState } from '@/components/ui/InteractionProps';
 import {
@@ -14,6 +14,8 @@ import {
   HelpCircle,
   Phone,
   LogIn,
+  LogOut,
+  Loader2,
 } from 'lucide-react';
 
 const consumerNavItems = [
@@ -44,7 +46,8 @@ function isNavActive(href: string, exact: boolean, pathname: string) {
 
 export const Sidebar: React.FC = () => {
   const pathname = usePathname();
-  const { user, isAuthenticated, isLoading } = useAuth();
+  const router = useRouter();
+  const { user, isAuthenticated, isLoading, logout, isLoadingLogout } = useAuth();
   const isAdmin = user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN';
   const items = isAdmin ? adminNavItems : consumerNavItems;
 
@@ -178,6 +181,39 @@ export const Sidebar: React.FC = () => {
           )}
         </nav>
       </div>
+
+      {/* Sign Out button — pinned above Helpline card */}
+      {isAuthenticated && (
+        <button
+          type="button"
+          onClick={() => {
+            if (!isLoadingLogout) {
+              logout(router);
+            }
+          }}
+          disabled={isLoadingLogout}
+          aria-busy={isLoadingLogout}
+          className={[
+            navItemBase,
+            pressedState,
+            'w-full rounded-xl px-3 py-2.5 mb-3 text-xs font-semibold shrink-0',
+            'transition-colors duration-150 cursor-pointer border border-transparent',
+            isLoadingLogout
+              ? 'bg-red-50 text-red-600 opacity-70 cursor-not-allowed'
+              : 'text-red-600 hover:bg-red-50 hover:border-red-200 active:bg-red-100',
+          ].join(' ')}
+          aria-label={isLoadingLogout ? 'Signing out, please wait' : 'Sign out'}
+        >
+          <span className="flex items-center gap-3 w-full">
+            {isLoadingLogout ? (
+              <Loader2 className="h-4 w-4 shrink-0 animate-spin text-red-600" aria-hidden="true" />
+            ) : (
+              <LogOut className="h-4 w-4 shrink-0 text-red-500" aria-hidden="true" />
+            )}
+            <span className="text-sm font-medium">{isLoadingLogout ? 'Signing out…' : 'Sign Out'}</span>
+          </span>
+        </button>
+      )}
 
       {/* Helpline card — pinned at bottom of sidebar */}
       <div className="rounded-2xl bg-slate-50 p-4 text-xs text-slate-500 space-y-2 border border-slate-200/80 shrink-0">

@@ -185,13 +185,13 @@ export class ConnectionService {
   public async getDashboardData(userId: string): Promise<any> {
     logger.info(`Dashboard data requested for userId=${userId}`);
 
-    const user = await userRepository.findById(userId);
-    if (!user) throw new NotFoundError('User');
+    const [user, connections, recentLogs] = await Promise.all([
+      userRepository.findById(userId),
+      connectionRepository.findByUserId(userId),
+      auditRepository.listRecentLogs(5, userId),
+    ]);
 
-    const connections = await connectionRepository.findByUserId(userId);
-    // Scope the activity feed to this consumer only — other users' audit logs
-    // must never appear on a consumer's dashboard.
-    const recentLogs = await auditRepository.listRecentLogs(5, userId);
+    if (!user) throw new NotFoundError('User');
 
     const decryptedMobile = user.mobileEncrypted
       ? encryptionService.decrypt(user.mobileEncrypted)

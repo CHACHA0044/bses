@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+
+jobs:
+  verify:
+    name: Verify (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [20, 22]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - name: Install workspace dependencies
+        run: npm ci
+
+      - name: Build shared package
+        run: npm run build -w shared
+
+      - name: Type-check all workspaces
+        run: npx turbo run type-check
+
+      - name: Unit tests — document-service
+        working-directory: services/document-service
+        run: npx vitest run
+
+      - name: Unit tests — notification-service
+        working-directory: services/notification-service
+        run: npx vitest run
+
+      - name: Frontend type-check
+        working-directory: frontend
+        run: npx tsc --noEmit
+
+  ocr-golden:
+    name: OCR golden accuracy (manual)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    if: github.event_name == 'workflow_dispatch'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install workspace dependencies
+        run: npm ci
+
+      - name: Run golden harness
+        working-directory: services/document-service
+        run: node -r ../../node_modules/ts-node-dev/node_modules/ts-node/register scripts/ocr-golden.ts
+        env:
+          GOLDEN_MIN_ACCURACY: "0.6"

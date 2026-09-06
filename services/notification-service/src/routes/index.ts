@@ -4,6 +4,7 @@ import { NotificationType } from '@bses/shared';
 import { sendSuccess } from '@bses/shared';
 import { createLogger } from '@bses/shared';
 import { getPrismaClient } from '../db/db.client';
+import { requireInternalSecret } from '../middleware/internal-auth';
 
 const logger = createLogger({ service: 'notification-routes' });
 
@@ -26,6 +27,9 @@ const persistNotificationLog = async (userId: string | undefined, type: Notifica
     logger.error('Failed to persist notification log', { error: err instanceof Error ? err.message : String(err) });
   }
 };
+
+// Internal service-to-service endpoints only — never expose to end users.
+router.use(requireInternalSecret);
 
 router.post('/sms', async (req, res, next) => {
   try {

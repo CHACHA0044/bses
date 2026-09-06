@@ -216,35 +216,6 @@ export const Navbar: React.FC = () => {
                     <span className="text-[10px] text-slate-500 font-semibold">{user?.role}</span>
                   </div>
                 </div>
-
-                {/* Logout — built on the shared Button so it inherits the same
-                    hover / focus-visible / active / disabled / loading / focus
-                    ring / icon-size treatment as every other button. The store-
-                    level `isLoadingLogout` guard prevents duplicate submissions:
-                    the first click flips the flag and the action becomes a
-                    no-op for every subsequent click until the request resolves.
-                    A failed request clears the flag so the button becomes
-                    clickable again. */}
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  isLoading={isLoadingLogout}
-                  loadingLabel="Signing out"
-                  disabled={isLoadingLogout}
-                  onClick={() => {
-                    if (isLoadingLogout) return;
-                    logout(router);
-                  }}
-                  aria-label="Sign out"
-                  title="Sign out"
-                  className="!px-2.5 !py-1.5 !min-h-[32px] !rounded-full !text-error hover:!bg-red-50 hover:!text-error"
-                  leftIcon={
-                    isLoadingLogout ? undefined : <LogOut className="h-4 w-4" aria-hidden="true" />
-                  }
-                >
-                  <span className="hidden sm:inline">Sign out</span>
-                </Button>
               </div>
             ) : (
               /* Unauthenticated top-bar: NO login button. The Login entry is

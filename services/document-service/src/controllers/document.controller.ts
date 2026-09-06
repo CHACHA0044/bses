@@ -38,6 +38,7 @@ export class DocumentController {
 
       const document = await documentService.uploadDocument({
         userId,
+        role: req.user?.role ?? '',
         connectionRequestId: connectionRequestId || null,
         documentType,
         fileBuffer: req.file.buffer,

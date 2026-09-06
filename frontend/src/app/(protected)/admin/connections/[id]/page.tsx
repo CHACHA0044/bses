@@ -160,6 +160,21 @@ export default function AdminConnectionDetailPage() {
     [connection],
   );
 
+  // Poll while any document is still in the OCR queue so reviewers see
+  // extracted results appear without a manual refresh.
+  const activeDocs = documents.filter(
+    (d) => d.ocrStatus === 'PENDING' || d.ocrStatus === 'PROCESSING',
+  );
+  const hasActiveOcr = activeDocs.length > 0;
+
+  useEffect(() => {
+    if (!hasActiveOcr) return;
+    const interval = setInterval(() => {
+      void revalidate();
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [hasActiveOcr, revalidate]);
+
   // Unique transition actions offered by the workflow engine for this status.
   const actionButtons = useMemo(() => {
     const seen = new Set<WorkflowActionType>();

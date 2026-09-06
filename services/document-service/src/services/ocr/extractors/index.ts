@@ -115,6 +115,7 @@ export const toExtractedData = (result: ExtractionResult): ExtractedData & {
     isUnreadable: result.isUnreadable,
     needsReview: result.needsReview,
     lowConfidenceFields: result.lowConfidenceFields,
+    detectedType: result.detectedType,
   };
 };
 

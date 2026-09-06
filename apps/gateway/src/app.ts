@@ -87,10 +87,10 @@ export const createApp = (): express.Application => {
     version: '1.0.0',
     getReadinessStatus: async () => {
       const services = [
-        { name: 'auth-service', url: `${config.AUTH_SERVICE_URL}/health` },
-        { name: 'consumer-service', url: `${config.CONSUMER_SERVICE_URL}/health` },
-        { name: 'document-service', url: `${config.DOCUMENT_SERVICE_URL}/health` },
-        { name: 'notification-service', url: `${config.NOTIFICATION_SERVICE_URL}/health` },
+        { name: 'auth-service', url: `${config.AUTH_SERVICE_URL}/ready` },
+        { name: 'consumer-service', url: `${config.CONSUMER_SERVICE_URL}/ready` },
+        { name: 'document-service', url: `${config.DOCUMENT_SERVICE_URL}/ready` },
+        { name: 'notification-service', url: `${config.NOTIFICATION_SERVICE_URL}/ready` },
       ];
 
       const checks = await Promise.allSettled(
@@ -176,6 +176,13 @@ export const createApp = (): express.Application => {
       // for proving the endpoint is being polled (it's a monotonic signal that
       // survives across requests inside this process).
       pingHits += 1;
+
+      // Non-blocking background keep-alive to child microservices' /ready endpoints
+      // to keep PostgreSQL / Prisma DB connection pools active and warm.
+      Promise.allSettled([
+        axios.get(`${config.AUTH_SERVICE_URL}/ready`, { timeout: 2000 }),
+        axios.get(`${config.CONSUMER_SERVICE_URL}/ready`, { timeout: 2000 }),
+      ]).catch(() => {/* non-fatal */});
 
       // Pull supervisor-reported child-service state via IPC. Under the BSES
       // supervisor this reflects live readiness of auth / consumer / document /

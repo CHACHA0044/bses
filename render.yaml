@@ -63,3 +63,16 @@ services:
         value: '3012'
       - key: INTERNAL_PORT_NOTIFICATION
         value: '3013'
+      # OCR pipeline (free tier ≈ 512 MB → single worker, bilingual Hindi+English)
+      - key: OCR_WORKERS
+        value: '1'
+      - key: OCR_MAX_ATTEMPTS
+        value: '3'
+      - key: OCR_RETRY_BACKOFF_MS
+        value: '30000'
+      - key: OCR_LANGUAGES
+        value: 'eng+hin'
+      - key: OCR_PDF_MAX_PAGES
+        value: '25'
+      - key: OCR_PDF_RENDER_DIMENSION
+        value: '1500'

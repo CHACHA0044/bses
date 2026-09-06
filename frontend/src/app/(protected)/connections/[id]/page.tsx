@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useParams } from 'next/navigation';
 import { useApiResource } from '@/hooks/useApiResource';
 import { StatusChip } from '@/components/ui/Badge';
@@ -43,6 +43,22 @@ export default function ConnectionDetailPage() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionWarning, setActionWarning] = useState<string | null>(null);
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
+
+  // Poll while any document is still in the OCR queue. The document service
+  // processes jobs in the background (worker pool) and the terminal state only
+  // becomes visible on a fresh fetch. Bound: wiped once every row is terminal.
+  const activeDocs = connection?.documents?.filter(
+    (d) => d.ocrStatus === 'PENDING' || d.ocrStatus === 'PROCESSING',
+  );
+  const hasActiveOcr = (activeDocs?.length ?? 0) > 0;
+
+  useEffect(() => {
+    if (!hasActiveOcr) return;
+    const interval = setInterval(() => {
+      void revalidate();
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [hasActiveOcr, revalidate]);
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -255,6 +271,12 @@ export default function ConnectionDetailPage() {
               <DocumentCard key={doc.id} doc={doc} variant="consumer" />
             ))}
           </div>
+          {hasActiveOcr && (
+            <p className="flex items-center gap-2 text-xs text-slate-500">
+              <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-600" />
+              Document{activeDocs!.length > 1 ? 's are' : ' is'} still being read by OCR — auto-refreshing…
+            </p>
+          )}
         </div>
       )}
 

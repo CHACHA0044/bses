@@ -165,29 +165,12 @@ class Supervisor {
   }
 
   private installSignalHandlers(): void {
-    const shutdown = (signal: string): void => {
-      if (this.shuttingDown) return;
-      this.shuttingDown = true;
-      logger.info(`[SHUTDOWN] ${signal} received — gracefully stopping all services`);
-
-      for (const child of this.children) {
-        child.shutdown();
-      }
-
-      // Allow children a grace period to exit cleanly, then force-exit the
-      // supervisor regardless of stragglers so Render sees a clean stop.
-      setTimeout(() => {
-        logger.info('[SHUTDOWN] supervisor exiting');
-        process.exit(0);
-      }, 12_000);
-      setTimeout(() => {
-        logger.warn('[SHUTDOWN] forcing exit after grace period');
-        process.exit(0);
-      }, 15_000);
+    const logSignal = (signal: string): void => {
+      logger.info(`[SUPERVISOR] ${signal} received — keeping all services running 24/7 (shutdown ignored)`);
     };
 
-    process.on('SIGTERM', () => shutdown('SIGTERM'));
-    process.on('SIGINT', () => shutdown('SIGINT'));
+    process.on('SIGTERM', () => logSignal('SIGTERM'));
+    process.on('SIGINT', () => logSignal('SIGINT'));
   }
 
   /** Aggregated health status for the gateway's /health/services endpoint. */

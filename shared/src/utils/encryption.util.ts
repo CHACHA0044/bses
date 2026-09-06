@@ -46,6 +46,12 @@ export class EncryptionService {
     return Buffer.concat([cipher.update(plaintext), cipher.final()]);
   }
 
+  /** Decrypts an in-memory buffer previously produced by `encryptBuffer`. */
+  public decryptBuffer(ciphertext: Buffer): Buffer {
+    const decipher = crypto.createDecipheriv(this.algorithm, this.getKey(), this.getIv());
+    return Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+  }
+
   /** Returns a Transform that decrypts an encrypted byte stream on read. */
   public decryptStream(): Transform {
     return crypto.createDecipheriv(this.algorithm, this.getKey(), this.getIv());

@@ -72,10 +72,12 @@ export const mergeQrAndOcr = (input: MergeInput): MergedExtraction => {
     merged.isUnreadable = ocrFields.isUnreadable ?? true;
     merged.needsReview = ocrFields.needsReview ?? false;
     merged.lowConfidenceFields = ocrFields.lowConfidenceFields ?? [];
+    merged.detectedType = ocrFields.detectedType;
     return merged as MergedExtraction;
   }
 
   merged.isUnreadable = !TRACKED_FIELD_KEYS.some((k) => !!merged[k]);
+  merged.detectedType = ocrFields.detectedType;
 
   if (qrCoversExpected) {
     // QR is authoritative and complete — nothing to review.

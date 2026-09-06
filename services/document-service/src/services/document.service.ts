@@ -12,6 +12,8 @@ const logger = createLogger({ service: 'document-service-logic' });
 
 export interface UploadDocumentDTO {
   userId: string;
+  /** Authenticated caller's role (used for ownership authorization). */
+  role: string;
   connectionRequestId?: string | null;
   documentType: DocumentType;
   fileBuffer: Buffer;
@@ -33,7 +35,28 @@ export class DocumentService {
     return getPrismaClient();
   }
 
-  public async uploadDocument(dto: UploadDocumentDTO): Promise<Document> {    const bucket = getGridFSBucket();
+  public async uploadDocument(dto: UploadDocumentDTO): Promise<Document> {
+    // 0. Authorize the connection attachment BEFORE any storage side effect.
+    //
+    // The connectionRequestId comes from the client verbatim, so we must prove
+    // (a) the application exists and (b) it belongs to the caller — otherwise
+    // any user could attach a document to somebody else's application. Admins
+    // may attach documents to any active application (verification workflows).
+    let connection: { id: string; status: ConnectionStatus; userId: string } | null = null;
+    if (dto.connectionRequestId) {
+      connection = await this.prisma.connectionRequest.findFirst({
+        where: { id: dto.connectionRequestId, deletedAt: null },
+        select: { id: true, status: true, userId: true },
+      });
+      if (!connection) {
+        throw new NotFoundError('ConnectionRequest');
+      }
+      if (connection.userId !== dto.userId && !isAdmin(dto.role)) {
+        throw new ForbiddenError('You do not have permission to attach documents to this connection');
+      }
+    }
+
+    const bucket = getGridFSBucket();
     const safeFilename = sanitizeFilename(dto.originalName);
 
     // 1. Stream binary buffer to MongoDB GridFS — encrypted at rest.
@@ -70,18 +93,13 @@ export class DocumentService {
     });
 
     // 3. Record the DOCUMENT_UPLOADED event on the application timeline
-    if (dto.connectionRequestId) {
-      const connection = await this.prisma.connectionRequest.findFirst({
-        where: { id: dto.connectionRequestId, deletedAt: null },
-        select: { status: true },
-      });
-      if (connection) {
+    if (connection) {
         // The filename is user-controlled and stored/rendered downstream, so
         // strip control characters and bound its length in the notes string.
         const notesName = (dto.originalName || 'document').replace(/[\u0000-\u001f\u007f]/g, '_').slice(0, 120);
         await this.prisma.applicationTimeline.create({
           data: {
-            connectionRequestId: dto.connectionRequestId,
+            connectionRequestId: connection.id,
             action: WorkflowActionType.DOCUMENT_UPLOADED,
             status: connection.status,
             performedBy: dto.userId,
@@ -89,15 +107,12 @@ export class DocumentService {
             metadata: { documentId: document.id, documentType: dto.documentType },
           },
         });
-      }
     }
 
-    // 4. Dispatch OCR processing asynchronously using the unencrypted buffer
-    setTimeout(() => {
-      ocrService.processDocument(document.id, dto.fileBuffer, dto.mimeType, dto.documentType).catch(err => {
-        logger.error('Unhandled error in background OCR process', err);
-      });
-    }, 0);
+    // 4. Dispatch durable OCR processing. The queue is database-backed and
+    // bounded; `enqueue` persists a PENDING row and a recovery sweep re-queues
+    // anything that was left PROCESSING after a crash/restart.
+    await ocrService.enqueue(document.id);
 
     logger.info(`Uploaded document to GridFS (ID: ${gridfsFileId}, Metadata ID: ${document.id})`);
     return document;
@@ -231,6 +246,20 @@ export class DocumentService {
       const column = EXTRACTED_FIELD_MAP[key];
       if (!column) continue;
       provided++;
+      if (key === 'aadhaar') {
+        // The stored source of truth is the FULL 12-digit number. A corrected
+        // value that is already masked (XXXX XXXX 1234) or otherwise shorter
+        // would silently persist an unusable/lossy identifier — reject it.
+        const normalized = value.replace(/[\s-]/g, '');
+        if (!/^\d{12}$/.test(normalized)) {
+          throw new ValidationError(
+            'Aadhaar must be the full 12-digit number as printed (masked values cannot be stored)',
+          );
+        }
+        data[column] = encryptionService.encrypt(normalized);
+        editedSet[key] = now;
+        continue;
+      }
       const trimmed = value.trim();
       if (!trimmed) continue;
       data[column] = encryptionService.encrypt(trimmed);
@@ -277,6 +306,15 @@ const EXTRACTED_FIELD_MAP: Record<string, string> = {
   licenseNumber: 'extractedLicenseNumberEncrypted',
   address: 'extractedAddressEncrypted',
   validity: 'extractedValidityEncrypted',
+  pinCode: 'extractedPinCodeEncrypted',
+  state: 'extractedStateEncrypted',
+  district: 'extractedDistrictEncrypted',
+  issueDate: 'extractedIssueDateEncrypted',
+  expiryDate: 'extractedExpiryDateEncrypted',
+  issuingAuthority: 'extractedIssuingAuthorityEncrypted',
+  bloodGroup: 'extractedBloodGroupEncrypted',
+  authorization: 'extractedAuthorizationEncrypted',
+  permanentAddress: 'extractedPermanentAddrEncrypted',
 };
 
 export const documentService = new DocumentService();

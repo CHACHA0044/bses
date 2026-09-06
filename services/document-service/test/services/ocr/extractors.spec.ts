@@ -115,7 +115,8 @@ describe('extractFields routing', () => {
       'Government of India\nName: RAJESH KUMAR\nDOB: 15/08/1990\n1234 5678 9012\nMale',
       DocumentType.AADHAAR_CARD,
     );
-    expect(result.extractedAadhaar).toBe('1990 1234 5678');
+    // The DOB year on the line above must NOT bleed into the Aadhaar number.
+    expect(result.extractedAadhaar).toBe('1234 5678 9012');
     expect(result.extractedName).toBe('RAJESH KUMAR');
     expect(result.extractedDob).toBe('15/08/1990');
     expect(result.isUnreadable).toBe(false);
@@ -263,6 +264,30 @@ describe('needsReview via extractFields', () => {
     );
     expect(result.extractedName).toBe('MANIKANDAN');
     expect(result.extractedFatherName).toBe('DURAISAMY');
+    expect(result.needsReview).toBe(false);
+  });
+});
+
+describe('DrivingLicenseExtractor (OCR-colon misread)', () => {
+  it.each([
+    ['S/W/D : AJAY DEMBLA', 'AJAY DEMBLA'],
+    ['S/W/D c AJAY DEMBLA', 'AJAY DEMBLA'],
+    ['S/W/D Ac AJAY DEMBLA', 'AJAY DEMBLA'],
+  ])('extracts the S/W/D name from "%s"', (swdLine, expected) => {
+    const text = [
+      'UNION OF INDIA DRIVING LICENSE',
+      'Issuing Authority : RTO, LUCKNOW',
+      'License No. : UP32 20220046117',
+      'Name : PRANAV DEMBLA',
+      'DOB : 05-04-2004',
+      swdLine,
+      'Present Address : B-145 RAJAJIPURAM, LUCKNOW, 226017',
+    ].join('\n');
+    const result = extractFields(text, DocumentType.ADDRESS_PROOF, 90);
+    expect(result.detectedType).toBe('DRIVING_LICENSE');
+    expect(result.extractedFatherName).toBe(expected);
+    expect(result.extractedName).toBe('PRANAV DEMBLA');
+    expect(result.extractedLicenseNumber).toBe('UP32 20220046117');
     expect(result.needsReview).toBe(false);
   });
 });

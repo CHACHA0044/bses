@@ -59,6 +59,13 @@ export interface ExtractedData {
   /** Keys of `EXTRACTED_FIELD_KEYS` whose value is likely a misread (e.g. an
    *  impossible DOB year) and should be verified manually. */
   lowConfidenceFields?: string[] | undefined;
+  /**
+   * Physical document type detected by the modular extractor registry
+   * (e.g. `"Aadhaar"`, `"Driving License"`). Informational — persisted to the
+   * durable `ocr_detected_type` column for review/analytics, never shown as a
+   * field value.
+   */
+  detectedType?: string | undefined;
 }
 
 /** Keys of `ExtractedData` that correspond to editable user-facing fields. */

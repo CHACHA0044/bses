@@ -22,6 +22,20 @@ const documentEnvSchema = baseEnvSchema.extend({
   INTERNAL_SERVICE_SECRET: z.string().min(32),
   UPLOAD_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(20),
   UPLOAD_RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(15 * 60 * 1000),
+
+  // ── OCR pipeline tuning (Render free tier ≈ 512 MB → be conservative) ─────
+  /** Concurrent OCR workers. Default 1 on the free tier; raise only with memory to spare. */
+  OCR_WORKERS: z.coerce.number().int().min(1).max(4).default(1),
+  /** Bounded retries per document before a job is marked FAILED. */
+  OCR_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(10).default(3),
+  /** Exponential backoff base for infra retries. */
+  OCR_RETRY_BACKOFF_MS: z.coerce.number().int().positive().default(30_000),
+  /** Tesseract languages ("eng", "hin", "eng+hin"). Loaded from `assets/`. */
+  OCR_LANGUAGES: z.string().min(3).default('eng+hin'),
+  /** Hard cap on PDF pages read / rendered per document. */
+  OCR_PDF_MAX_PAGES: z.coerce.number().int().min(1).max(100).default(25),
+  /** Max long-edge (px) when rasterizing scanned PDF pages. */
+  OCR_PDF_RENDER_DIMENSION: z.coerce.number().int().min(500).max(2000).default(1500),
 });
 
 export const config = createConfig(documentEnvSchema);

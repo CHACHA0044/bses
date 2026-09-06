@@ -17,6 +17,27 @@ interface DocumentCardProps {
   actions?: React.ReactNode;
 }
 
+/** Fields a consumer/owner may correct; mirrors the backend's editable surface. */
+const EDITABLE_FIELDS: { key: string; label: string; placeholder?: string; mono?: boolean }[] = [
+  { key: 'name', label: 'Extracted Full Name', placeholder: 'Full name as printed on document' },
+  { key: 'fatherName', label: 'Father / Guardian Name' },
+  { key: 'dob', label: 'Date of Birth (DOB)', placeholder: 'DD/MM/YYYY' },
+  { key: 'aadhaar', label: 'Aadhaar Number', placeholder: 'Full 12-digit number', mono: true },
+  { key: 'pan', label: 'PAN Number', placeholder: 'ABCDE1234F', mono: true },
+  { key: 'licenseNumber', label: 'License Number', mono: true },
+  { key: 'validity', label: 'Validity / Expiry', placeholder: 'DD/MM/YYYY' },
+  { key: 'issueDate', label: 'Issue Date', placeholder: 'DD/MM/YYYY' },
+  { key: 'issuingAuthority', label: 'Issuing Authority' },
+  { key: 'pinCode', label: 'PIN Code', mono: true },
+  { key: 'state', label: 'State' },
+  { key: 'district', label: 'District' },
+  { key: 'address', label: 'Address' },
+];
+
+/** A physically-masked card prints only the last 4 digits — it cannot be corrected to
+ *  a full number, so it must be excluded from a correction payload. */
+const looksMasked = (value: string): boolean => /X/i.test(value);
+
 /**
  * DocumentCard — shared uploaded-document tile used by the consumer and admin
  * connection detail pages. Renders name/type/size, status chips, and the OCR
@@ -24,19 +45,25 @@ interface DocumentCardProps {
  */
 export const DocumentCard: React.FC<DocumentCardProps> = ({ doc, variant = 'consumer', actions }) => {
   const isAdmin = variant === 'admin';
-  const hasOcr = doc.ocrStatus === 'EXTRACTED' || doc.ocrStatus === 'NEEDS_REVIEW';
+  const hasOcr =
+    doc.ocrStatus === 'EXTRACTED' ||
+    doc.ocrStatus === 'NEEDS_REVIEW' ||
+    doc.ocrStatus === 'PARTIAL';
 
   const [isEditing, setIsEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
-  const [fields, setFields] = useState({
-    name: doc.ocrData?.name || '',
-    dob: doc.ocrData?.dob || '',
-    aadhaar: doc.ocrData?.aadhaar || '',
-    pan: doc.ocrData?.pan || '',
-  });
+  const [fields, setFields] = useState<Record<string, string>>(() => {
+  const init: Record<string, string> = {};
+  for (const f of EDITABLE_FIELDS) {
+    const raw =
+      (doc.ocrData as Record<string, string | null | undefined> | undefined)?.[f.key] ?? '';
+    init[f.key] = raw || '';
+  }
+  return init;
+});
 
   const ocrFields = [
     { key: 'aadhaar', label: 'Aadhaar', value: doc.ocrData?.aadhaar },
@@ -61,13 +88,17 @@ export const DocumentCard: React.FC<DocumentCardProps> = ({ doc, variant = 'cons
     setSaveSuccess(false);
 
     try {
+      // Never persist a masked/partial Aadhaar — the backend stores the full
+      // 12-digit number and rejects masked corrections (they cannot be read back).
+      const payload: Record<string, string> = {};
+      for (const f of EDITABLE_FIELDS) {
+        const value = fields[f.key] ?? '';
+        if (f.key === 'aadhaar' && value && looksMasked(value)) continue;
+        payload[f.key] = value;
+      }
+
       const res = await apiClient.patch(`/documents/${doc.id}/extracted-data`, {
-        fields: {
-          name: fields.name,
-          dob: fields.dob,
-          aadhaar: fields.aadhaar,
-          pan: fields.pan,
-        },
+        fields: payload,
       });
 
       if (res.data?.success) {
@@ -127,6 +158,14 @@ export const DocumentCard: React.FC<DocumentCardProps> = ({ doc, variant = 'cons
             {isAdmin
               ? 'Low OCR confidence — verify the extracted values below before approving.'
               : 'OCR confidence was low for this document — please double-check the extracted details.'}
+          </p>
+        )}
+
+        {doc.ocrStatus === 'FAILED' && (
+          <p className="text-[11px] text-rose-600 border-t border-slate-200/70 pt-2">
+            {isAdmin
+              ? `OCR failed after ${doc.ocrAttempts ? `${doc.ocrAttempts} attempt(s) ` : ''}— review manually.`
+              : 'This document could not be processed automatically. BSES may contact you for a clearer copy.'}
           </p>
         )}
 
@@ -211,48 +250,21 @@ export const DocumentCard: React.FC<DocumentCardProps> = ({ doc, variant = 'cons
             )}
 
             <form onSubmit={handleSave} className="space-y-3 text-xs">
-              <div>
-                <label className="font-semibold text-slate-700 block mb-1">Extracted Full Name</label>
-                <input
-                  type="text"
-                  value={fields.name}
-                  onChange={(e) => setFields({ ...fields, name: e.target.value })}
-                  placeholder="Full name as printed on document"
-                  className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs text-slate-900 focus:border-amber-500"
-                />
-              </div>
-
-              <div>
-                <label className="font-semibold text-slate-700 block mb-1">Date of Birth (DOB)</label>
-                <input
-                  type="text"
-                  value={fields.dob}
-                  onChange={(e) => setFields({ ...fields, dob: e.target.value })}
-                  placeholder="DD/MM/YYYY"
-                  className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs text-slate-900 focus:border-amber-500"
-                />
-              </div>
-
-              <div>
-                <label className="font-semibold text-slate-700 block mb-1">Aadhaar Number (Extracted)</label>
-                <input
-                  type="text"
-                  value={fields.aadhaar}
-                  onChange={(e) => setFields({ ...fields, aadhaar: e.target.value })}
-                  placeholder="XXXX-XXXX-XXXX"
-                  className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs font-mono text-slate-900 focus:border-amber-500"
-                />
-              </div>
-
-              <div>
-                <label className="font-semibold text-slate-700 block mb-1">PAN Number (Extracted)</label>
-                <input
-                  type="text"
-                  value={fields.pan}
-                  onChange={(e) => setFields({ ...fields, pan: e.target.value })}
-                  placeholder="ABCDE1234F"
-                  className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs font-mono text-slate-900 uppercase focus:border-amber-500"
-                />
+              <div className="max-h-72 overflow-y-auto pr-1 space-y-3">
+                {EDITABLE_FIELDS.map((f) => (
+                  <div key={f.key}>
+                    <label className="font-semibold text-slate-700 block mb-1">{f.label}</label>
+                    <input
+                      type="text"
+                      value={fields[f.key] ?? ''}
+                      onChange={(e) => setFields({ ...fields, [f.key]: e.target.value })}
+                      placeholder={f.placeholder}
+                      className={`w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs text-slate-900 focus:border-amber-500 ${
+                        f.mono ? 'font-mono uppercase' : ''
+                      }`}
+                    />
+                  </div>
+                ))}
               </div>
 
               <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">

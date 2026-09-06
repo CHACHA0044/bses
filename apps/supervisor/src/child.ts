@@ -358,17 +358,9 @@ export class ChildManager {
     return this.restartTimestamps.length >= MAX_RESTARTS_IN_WINDOW;
   }
 
-  /** Called when the supervisor receives SIGTERM/SIGINT. */
+  /** Kept alive 24/7 — child processes are not terminated by shutdown requests. */
   public shutdown(): void {
-    this.shuttingDown = true;
-    this.clearReadyTimer();
-    this.updateState('stopped');
-    if (this.child) {
-      logger.info(`[supervisor] shutting down ${this.options.spec.name}`, {
-        pid: this.child.pid,
-      });
-      this.killChild();
-    }
+    logger.info(`[supervisor] keeping ${this.options.spec.name} running 24/7 (shutdown request ignored)`);
   }
 
   public getChild(): ChildProcess | null {

@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { MapPin, Navigation, Check, X, Search, Compass, Building, Info, Loader2 } from 'lucide-react';
 
 // Augment Window to include Leaflet's global `L` (loaded via CDN script tag at runtime)
@@ -328,38 +329,58 @@ export const LocationPickerModal: React.FC<LocationPickerModalProps> = ({
       lm.pinCode.includes(searchQuery),
   );
 
-  if (!isOpen) return null;
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/75 backdrop-blur-sm p-3 sm:p-4 overflow-y-auto animate-fade-in">
-      <div className="bg-white w-full max-w-4xl rounded-2xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[90vh]">
+  useEffect(() => {
+    if (!isOpen) return;
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [isOpen]);
+
+  if (!isOpen || !mounted) return null;
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/75 backdrop-blur-md p-0 sm:p-4 md:p-6 overflow-y-auto animate-fade-in"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div className="bg-white w-full sm:max-w-4xl h-full sm:h-auto max-h-none sm:max-h-[88vh] rounded-none sm:rounded-2xl shadow-2xl border border-slate-200/80 overflow-hidden flex flex-col my-auto relative">
         {/* Modal Header */}
-        <div className="px-5 py-4 bg-slate-900 text-white flex items-center justify-between">
+        <div className="px-4 sm:px-5 py-3 sm:py-4 bg-slate-900 text-white flex items-center justify-between shrink-0">
           <div className="flex items-center gap-2.5">
-            <div className="p-2 bg-amber-500/20 text-amber-400 rounded-xl">
-              <MapPin className="w-5 h-5" />
+            <div className="p-1.5 sm:p-2 bg-amber-500/20 text-amber-400 rounded-xl">
+              <MapPin className="w-4 h-4 sm:w-5 sm:h-5" />
             </div>
             <div>
-              <h3 className="text-base font-bold leading-tight">Pick Property Location on Map</h3>
-              <p className="text-xs text-slate-400">BSES Delhi Electricity Supply Area Map</p>
+              <h3 className="text-sm sm:text-base font-bold leading-tight">Pick Property Location on Map</h3>
+              <p className="text-[11px] sm:text-xs text-slate-400">BSES Delhi Electricity Supply Area Map</p>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition"
+            className="p-1.5 sm:p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition active:scale-95 cursor-pointer"
+            aria-label="Close modal"
           >
-            <X className="w-5 h-5" />
+            <X className="w-4 h-4 sm:w-5 sm:h-5" />
           </button>
         </div>
 
         {/* Action Toolbar */}
-        <div className="p-3 bg-slate-50 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2 text-xs">
+        <div className="p-2.5 sm:px-5 sm:py-3 bg-slate-50 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2 text-xs shrink-0">
           {/* GPS Location Button */}
           <button
             type="button"
             onClick={handleDetectGPS}
             disabled={isLocating}
-            className="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-3.5 py-2 rounded-xl shadow-sm transition active:scale-95 cursor-pointer disabled:opacity-50"
+            className="inline-flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-3.5 py-2 rounded-xl shadow-sm transition active:scale-95 cursor-pointer disabled:opacity-50 text-xs w-full sm:w-auto"
           >
             {isLocating ? (
               <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -370,8 +391,8 @@ export const LocationPickerModal: React.FC<LocationPickerModalProps> = ({
           </button>
 
           {/* Coordinate Readout */}
-          <div className="flex items-center gap-2 text-slate-600 font-mono text-[11px] bg-white border border-slate-200 rounded-lg px-3 py-1.5">
-            <Compass className="w-3.5 h-3.5 text-amber-500" />
+          <div className="flex items-center justify-center gap-2 text-slate-700 font-mono text-[11px] bg-white border border-slate-200 rounded-xl px-3 py-1.5 shadow-2xs w-full sm:w-auto">
+            <Compass className="w-3.5 h-3.5 text-amber-500 shrink-0" />
             <span>
               Lat: <strong>{coords.lat.toFixed(4)}</strong>, Lng: <strong>{coords.lng.toFixed(4)}</strong>
             </span>
@@ -379,28 +400,28 @@ export const LocationPickerModal: React.FC<LocationPickerModalProps> = ({
         </div>
 
         {geoError && (
-          <div className="px-4 py-2 bg-red-50 text-red-600 text-xs border-b border-red-200 flex items-center gap-2">
+          <div className="px-4 py-2 bg-red-50 text-red-600 text-xs border-b border-red-200 flex items-center gap-2 shrink-0">
             <Info className="w-4 h-4 shrink-0" />
             <span>{geoError}</span>
           </div>
         )}
 
         {/* Modal Body Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-12 flex-1 overflow-hidden">
-          {/* Map Area (8 cols) */}
-          <div className="md:col-span-8 relative min-h-[280px] sm:min-h-[360px] bg-slate-100 flex flex-col">
-            <div ref={mapContainerRef} className="w-full h-full min-h-[300px] z-0" />
+        <div className="flex flex-col md:grid md:grid-cols-12 flex-1 min-h-0 overflow-y-auto md:overflow-hidden">
+          {/* Map Area */}
+          <div className="md:col-span-7 lg:col-span-8 relative h-[240px] sm:h-[300px] md:h-auto min-h-[220px] md:min-h-[380px] bg-slate-100 flex flex-col shrink-0 md:shrink border-b md:border-b-0 md:border-r border-slate-200">
+            <div ref={mapContainerRef} className="w-full h-full z-0" />
 
-            <div className="absolute top-3 left-3 z-10 bg-white/90 backdrop-blur-md border border-slate-200 text-slate-800 text-[11px] font-medium px-3 py-1.5 rounded-lg shadow-md flex items-center gap-1.5">
-              <MapPin className="w-3.5 h-3.5 text-amber-500" />
-              <span>Click on map or drag pin to select exact building</span>
+            <div className="absolute top-3 left-3 z-10 bg-white/95 backdrop-blur-md border border-slate-200 text-slate-800 text-[11px] font-semibold px-3 py-1.5 rounded-xl shadow-md flex items-center gap-1.5 pointer-events-none max-w-[90%]">
+              <MapPin className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+              <span className="truncate">Click map or drag pin to select building</span>
             </div>
           </div>
 
-          {/* Location Sidebar (4 cols) */}
-          <div className="md:col-span-4 p-4 bg-white border-l border-slate-200 flex flex-col justify-between overflow-y-auto space-y-4 max-h-[380px] md:max-h-none">
+          {/* Location Sidebar Details */}
+          <div className="md:col-span-5 lg:col-span-4 p-4 sm:p-5 bg-white flex flex-col justify-between overflow-y-auto space-y-4 flex-1 md:flex-initial">
             <div className="space-y-3">
-              <label className="block text-xs font-bold text-slate-800 uppercase tracking-wide">
+              <label className="block text-xs font-bold text-slate-800 uppercase tracking-wider">
                 Quick Select Landmark
               </label>
 
@@ -412,12 +433,12 @@ export const LocationPickerModal: React.FC<LocationPickerModalProps> = ({
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   placeholder="Search Delhi area or pincode…"
-                  className="w-full bg-slate-50 border border-slate-300 rounded-xl pl-9 pr-3 py-1.5 text-xs text-slate-900 focus:outline-none focus:border-amber-500"
+                  className="w-full bg-slate-50 border border-slate-300 rounded-xl pl-9 pr-3 py-2 text-xs text-slate-900 focus:outline-none focus:border-amber-500 transition"
                 />
               </div>
 
               {/* Landmark List Chips */}
-              <div className="max-h-40 overflow-y-auto space-y-1.5 pr-1 text-xs">
+              <div className="max-h-36 sm:max-h-40 overflow-y-auto space-y-1.5 pr-1 text-xs">
                 {filteredLandmarks.map((lm, idx) => (
                   <button
                     key={idx}
@@ -440,8 +461,8 @@ export const LocationPickerModal: React.FC<LocationPickerModalProps> = ({
             </div>
 
             {/* Address Details Input */}
-            <div className="space-y-3 pt-2 border-t border-slate-200">
-              <label className="block text-xs font-bold text-slate-800 uppercase tracking-wide">
+            <div className="space-y-3 pt-3 border-t border-slate-200">
+              <label className="block text-xs font-bold text-slate-800 uppercase tracking-wider">
                 Selected Location Details
               </label>
 
@@ -454,7 +475,7 @@ export const LocationPickerModal: React.FC<LocationPickerModalProps> = ({
                   value={flatNo}
                   onChange={(e) => setFlatNo(e.target.value)}
                   placeholder="e.g. Flat B-112 or Plot 42"
-                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-1.5 text-xs text-slate-900 focus:outline-none focus:border-amber-500"
+                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:border-amber-500 transition"
                 />
               </div>
 
@@ -466,7 +487,7 @@ export const LocationPickerModal: React.FC<LocationPickerModalProps> = ({
                   value={streetAddress}
                   onChange={(e) => setStreetAddress(e.target.value)}
                   rows={2}
-                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-1.5 text-xs text-slate-900 focus:outline-none focus:border-amber-500"
+                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:border-amber-500 transition"
                   placeholder="Street name, landmark, colony"
                 />
               </div>
@@ -476,7 +497,7 @@ export const LocationPickerModal: React.FC<LocationPickerModalProps> = ({
             <button
               type="button"
               onClick={handleConfirmLocation}
-              className="w-full inline-flex items-center justify-center gap-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs py-2.5 px-4 rounded-xl shadow-md cursor-pointer active:scale-95 transition mt-2"
+              className="w-full inline-flex items-center justify-center gap-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs py-3 sm:py-2.5 px-4 rounded-xl shadow-md cursor-pointer active:scale-95 transition mt-2 shrink-0"
             >
               <Check className="w-4 h-4" />
               <span>Confirm & Use Selected Address</span>
@@ -484,6 +505,7 @@ export const LocationPickerModal: React.FC<LocationPickerModalProps> = ({
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };

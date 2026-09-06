@@ -1,4 +1,5 @@
 import { createLogger } from '@bses/shared';
+import { config } from '../config';
 
 const logger = createLogger({ service: 'notification-client' });
 
@@ -20,7 +21,10 @@ export class NotificationClient {
     try {
       const res = await fetch(`${NOTIFICATION_SERVICE_URL}${path}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'x-internal-secret': config.INTERNAL_SERVICE_SECRET,
+        },
         body: JSON.stringify(body),
         signal: controller.signal,
       });

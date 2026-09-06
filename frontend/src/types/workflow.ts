@@ -34,7 +34,14 @@ export type AssignmentStatus = 'ACTIVE' | 'REPLACED' | 'CLOSED';
 
 export type DocumentStatus = 'PENDING' | 'VERIFIED' | 'REJECTED';
 
-export type OcrStatus = 'PROCESSING' | 'EXTRACTED' | 'UNREADABLE' | 'NEEDS_REVIEW';
+export type OcrStatus =
+  | 'PENDING'
+  | 'PROCESSING'
+  | 'EXTRACTED'
+  | 'PARTIAL'
+  | 'NEEDS_REVIEW'
+  | 'UNREADABLE'
+  | 'FAILED';
 
 export interface DocumentOcrData {
   aadhaar?: string | null;
@@ -76,6 +83,9 @@ export interface DocumentRecord {
   needsReview?: boolean;
   ocrLowConfidenceFields?: string[];
   ocrData?: DocumentOcrData;
+  ocrAttempts?: number;
+  ocrDetectedType?: string | null;
+  ocrLanguages?: string | null;
 }
 
 export interface TimelineEvent {

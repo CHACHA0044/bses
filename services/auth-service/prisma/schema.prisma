@@ -63,6 +63,21 @@ enum DocumentStatus {
   REJECTED
 }
 
+// Durable the OCR pipeline state (the database is the source of truth for the
+// background job). Maps onto the derived `isUnreadable`/`needsReview` view
+// flags: PENDING/PROCESSING are pre-result, EXTRACTED/PARTIAL are good reads,
+// NEEDS_REVIEW/UNREADABLE are document-quality outcomes, FAILED is reserved
+// for infrastructure failures (distinct from an unreadable document).
+enum OcrJobStatus {
+  PENDING
+  PROCESSING
+  EXTRACTED
+  PARTIAL
+  NEEDS_REVIEW
+  UNREADABLE
+  FAILED
+}
+
 enum NotificationType {
   SMS
   WHATSAPP
@@ -382,6 +397,25 @@ model Document {
   ocrLowConfidenceFields             Json?     @map("ocr_low_confidence_fields")
   ocrFieldSources                    Json?     @map("ocr_field_sources")
 
+  // ── Durable OCR job state (DB is source of truth, survives restarts) ────
+  ocrStatus          OcrJobStatus @default(PENDING) @map("ocr_status")
+  ocrAttempts        Int          @default(0) @map("ocr_attempts")
+  ocrStartedAt       DateTime?    @map("ocr_started_at")
+  ocrCompletedAt     DateTime?    @map("ocr_completed_at")
+  ocrNextAttemptAt   DateTime?    @map("ocr_next_attempt_at")
+  ocrLastError       String?      @map("ocr_last_error") @db.Text
+  // Detected physical document type (from the modular extractor registry).
+  ocrDetectedType    String?      @map("ocr_detected_type") @db.VarChar(50)
+  // OCR engine configuration used for this run (e.g. "eng", "eng+hin").
+  ocrLanguages       String?      @map("ocr_languages") @db.VarChar(50)
+  // Per-page processing metadata (page number, kind, status, confidence).
+  // Contains NO field values — only non-sensitive structure (see ocrFieldDetails).
+  ocrPageResults     Json?        @map("ocr_page_results")
+  // Per-field provenance: key -> { page, source, confidence, bbox } (no values).
+  ocrFieldDetails    Json?        @map("ocr_field_details")
+  // Run-level diagnostics: timings, errorCode, candidateCount, orientation, etc.
+  ocrMetrics         Json?        @map("ocr_metrics")
+
   user              User               @relation(fields: [userId], references: [id], onDelete: Restrict)
   connectionRequest ConnectionRequest? @relation(fields: [connectionRequestId], references: [id])
 
@@ -425,6 +459,8 @@ model AuditLog {
 
   @@index([performedBy])
   @@index([timestamp])
+  @@index([userId])
+  @@index([userId, timestamp])
   @@map("audit_logs")
 }
 

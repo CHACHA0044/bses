@@ -158,14 +158,7 @@ export const LoginForm: React.FC = () => {
           't=',
           new Date().toISOString(),
         );
-        warmPostLogin(role);
-        // Use full page document location assign to ensure HTTP-only cookies are fully committed
-        // in browser cookie store before Next.js middleware evaluates the destination route.
-        if (typeof window !== 'undefined') {
-          window.location.assign(dest);
-        } else {
-          router.replace(dest);
-        }
+        router.replace(dest);
       } else {
         // eslint-disable-next-line no-console
         console.warn(

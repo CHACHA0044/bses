@@ -45,8 +45,11 @@ const NAME_RE = /(?:Name)\s*[:\t]+\s*(.+)/i;
 const DOB_RE =
   /(?:DOB|Date\s*of\s*Birth|D\.?\s?O\.?\s?B\.?)\s*[:\t]+\s*(\d{2}[/\-\.]\d{2}[/\-\.]\d{4})/i;
 
-// Father/Spouse/Guardian: S/W/D label
-const SWD_RE = /(?:S\/?W\/?D|Son|Wife|Daughter|Father(?:'?s?\s*Name)?|Guardian)\s*[:\t]+\s*(.+)/i;
+// Father/Spouse/Guardian: S/W/D label. The separator tolerates OCR
+// misreads of the colon: PDF renders often tokenize ` : ` → `c ` and
+// `: A` → `Ac`, so accept a colon and/or an optional noise token.
+const SWD_RE =
+  /(?:S\/?W\/?D|Son|Wife|Daughter|Father(?:'?s?\s*Name)?|Guardian)\s*[:\t]*\s*(?:[cC]|[Aa]c)?\s*(.+)/i;
 
 // Issuing Authority
 const AUTHORITY_RE = /(?:Issuing\s*Authority)\s*[:\t]+\s*(.+)/i;

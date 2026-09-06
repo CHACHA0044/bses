@@ -149,14 +149,14 @@ export default function ApplyConnectionPage() {
   };
 
   return (
-    <div className="max-w-3xl mx-auto space-y-6 p-2">
+    <div className="max-w-3xl mx-auto space-y-4 sm:space-y-6 px-1 sm:px-4 py-2 sm:py-4">
       <div>
-        <h1 className="text-2xl font-bold text-slate-900">New Electricity Connection Application</h1>
-        <p className="text-xs text-slate-500">Multi-step online service request wizard for BSES Delhi consumers</p>
+        <h1 className="text-xl sm:text-2xl font-bold text-slate-900 leading-tight">New Electricity Connection Application</h1>
+        <p className="text-xs text-slate-500 mt-0.5">Multi-step online service request wizard for BSES Delhi consumers</p>
       </div>
 
       {/* Wizard Progress Bar with Animated Moving Arrows */}
-      <div className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200 shadow-sm">
+      <div className="bg-white p-3.5 sm:p-5 rounded-2xl border border-slate-200 shadow-sm">
         <div className="flex items-center justify-between gap-1 sm:gap-2">
           {[
             { num: 1, label: 'Property' },
@@ -172,12 +172,12 @@ export default function ApplyConnectionPage() {
                 {/* Step Pill */}
                 <div
                   onClick={() => isCompleted && setStep(s.num)}
-                  className={`flex items-center gap-2 transition-all duration-300 ${
+                  className={`flex items-center gap-1.5 sm:gap-2 transition-all duration-300 shrink-0 ${
                     isCompleted ? 'cursor-pointer' : ''
                   }`}
                 >
                   <span
-                    className={`w-7 h-7 sm:w-8 sm:h-8 rounded-full flex items-center justify-center text-xs font-bold transition-all duration-300 ${
+                    className={`w-7 h-7 sm:w-8 sm:h-8 rounded-full flex items-center justify-center text-xs font-bold transition-all duration-300 shrink-0 ${
                       isActive
                         ? 'bg-amber-500 text-slate-950 ring-4 ring-amber-500/20 shadow-md scale-105'
                         : isCompleted
@@ -188,7 +188,7 @@ export default function ApplyConnectionPage() {
                     {isCompleted ? <CheckCircle2 className="w-4 h-4 text-white" /> : s.num}
                   </span>
                   <span
-                    className={`text-xs sm:text-sm font-bold transition-colors ${
+                    className={`text-xs sm:text-sm font-bold transition-colors hidden sm:inline ${
                       isActive
                         ? 'text-amber-600 font-extrabold'
                         : isCompleted
@@ -202,7 +202,7 @@ export default function ApplyConnectionPage() {
 
                 {/* Animated Arrow Connector between steps */}
                 {idx < arr.length - 1 && (
-                  <div className="flex-1 flex items-center justify-center px-1 sm:px-2">
+                  <div className="flex-1 flex items-center justify-center px-0.5 sm:px-2 min-w-[12px] sm:min-w-0">
                     <div className="relative w-full flex items-center justify-center">
                       <div
                         className={`h-0.5 w-full transition-all duration-500 ${
@@ -210,7 +210,7 @@ export default function ApplyConnectionPage() {
                         }`}
                       />
                       <div
-                        className={`absolute p-1 rounded-full bg-white border transition-all duration-300 ${
+                        className={`absolute p-0.5 sm:p-1 rounded-full bg-white border transition-all duration-300 ${
                           step === s.num
                             ? 'border-amber-400 text-amber-600 shadow-md animate-bounce-horizontal scale-110 z-10'
                             : step > s.num
@@ -218,7 +218,7 @@ export default function ApplyConnectionPage() {
                             : 'border-slate-200 text-slate-300'
                         }`}
                       >
-                        <ArrowRight className="w-3.5 h-3.5" />
+                        <ArrowRight className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
                       </div>
                     </div>
                   </div>
@@ -227,10 +227,17 @@ export default function ApplyConnectionPage() {
             );
           })}
         </div>
+        {/* Mobile Active Step Indicator */}
+        <div className="sm:hidden mt-3 pt-2.5 border-t border-slate-100 flex items-center justify-between text-xs font-semibold text-slate-600">
+          <span>Step {step} of 4</span>
+          <span className="text-amber-600 font-extrabold uppercase tracking-wide">
+            {['Property', 'Load & Type', 'Documents', 'Review'][step - 1]}
+          </span>
+        </div>
       </div>
 
       {serverError && (
-        <div className="bg-red-500/10 border border-red-500/30 text-red-600 p-4 rounded-xl text-sm flex items-start gap-3">
+        <div className="bg-red-500/10 border border-red-500/30 text-red-600 p-3.5 sm:p-4 rounded-xl text-xs sm:text-sm flex items-start gap-3">
           <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
           <span>{serverError}</span>
         </div>
@@ -252,17 +259,17 @@ export default function ApplyConnectionPage() {
         )}
       </AlertSlot>
 
-      <form onSubmit={handleSubmit(onSubmit)} className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-6">
+      <form onSubmit={handleSubmit(onSubmit)} className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 sm:p-6 space-y-5 sm:space-y-6">
         {step === 1 && (
           <div className="space-y-4">
-            <h2 className="text-sm font-bold text-slate-800 uppercase">Step 1: Property Location</h2>
+            <h2 className="text-xs sm:text-sm font-bold text-slate-800 uppercase tracking-wide">Step 1: Property Location</h2>
             <div>
-              <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 mb-2">
                 <label className="block text-xs font-semibold text-slate-700 uppercase">Full Property Address *</label>
                 <button
                   type="button"
                   onClick={() => setIsMapOpen(true)}
-                  className="inline-flex items-center gap-1.5 text-xs font-bold text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-300 rounded-xl px-3 py-1.5 transition cursor-pointer active:scale-95 shadow-sm"
+                  className="w-full sm:w-auto inline-flex items-center justify-center gap-1.5 text-xs font-bold text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-300 rounded-xl px-3.5 py-2 transition cursor-pointer active:scale-95 shadow-sm"
                 >
                   <MapPin className="w-3.5 h-3.5 text-amber-600" />
                   <span>Choose / Pin Location on Map</span>
@@ -270,8 +277,8 @@ export default function ApplyConnectionPage() {
               </div>
               <textarea
                 {...register('propertyAddress')}
-                rows={4}
-                className={`w-full bg-slate-50 border rounded-xl p-3 text-sm text-slate-900 focus:outline-none transition ${
+                rows={3}
+                className={`w-full bg-slate-50 border rounded-xl p-3 text-xs sm:text-sm text-slate-900 focus:outline-none transition ${
                   errors.propertyAddress
                     ? 'border-red-500 focus:border-red-500 ring-2 ring-red-500/20'
                     : 'border-slate-300 focus:border-amber-500'
@@ -288,11 +295,11 @@ export default function ApplyConnectionPage() {
               initialAddress={propertyAddressVal}
             />
 
-            <div className="flex justify-center pt-2">
+            <div className="flex flex-col-reverse sm:flex-row justify-center items-stretch sm:items-center gap-2.5 pt-2 w-full">
               <button
                 type="button"
                 onClick={handleStep1Next}
-                className="inline-flex items-center gap-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs py-2.5 px-5 rounded-xl shadow cursor-pointer active:scale-95 transition"
+                className="w-full sm:w-auto inline-flex items-center justify-center gap-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs py-3 sm:py-2.5 px-6 rounded-xl shadow cursor-pointer active:scale-95 transition"
               >
                 <span>Next: Connection Details</span>
                 <ArrowRight className="w-4 h-4" />
@@ -303,11 +310,11 @@ export default function ApplyConnectionPage() {
 
         {step === 2 && (
           <div className="space-y-4">
-            <h2 className="text-sm font-bold text-slate-800 uppercase">Step 2: Connection Type & Required Load</h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <h2 className="text-xs sm:text-sm font-bold text-slate-800 uppercase tracking-wide">Step 2: Connection Type & Required Load</h2>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="block text-xs font-semibold text-slate-700 uppercase mb-1">Connection Category *</label>
-                <select {...register('connectionType')} className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-sm text-slate-900">
+                <select {...register('connectionType')} className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs sm:text-sm text-slate-900">
                   <option value="DOMESTIC">Domestic Connection</option>
                   <option value="COMMERCIAL">Commercial Connection</option>
                   <option value="INDUSTRIAL">Industrial Connection</option>
@@ -321,7 +328,7 @@ export default function ApplyConnectionPage() {
                   {...register('requiredLoad')}
                   type="number"
                   step="0.5"
-                  className={`w-full bg-slate-50 border rounded-xl p-2.5 text-sm text-slate-900 focus:outline-none transition ${
+                  className={`w-full bg-slate-50 border rounded-xl p-2.5 text-xs sm:text-sm text-slate-900 focus:outline-none transition ${
                     errors.requiredLoad ? 'border-red-500 ring-2 ring-red-500/20' : 'border-slate-300 focus:border-amber-500'
                   }`}
                 />
@@ -329,14 +336,18 @@ export default function ApplyConnectionPage() {
               </div>
             </div>
 
-            <div className="flex justify-center gap-3 pt-2">
-              <button type="button" onClick={() => setStep(1)} className="px-4 py-2 rounded-xl border text-xs font-bold text-slate-600">
+            <div className="flex flex-col-reverse sm:flex-row justify-center items-stretch sm:items-center gap-2.5 pt-2 w-full">
+              <button
+                type="button"
+                onClick={() => setStep(1)}
+                className="w-full sm:w-auto px-5 py-2.5 rounded-xl border border-slate-300 text-xs font-bold text-slate-600 hover:bg-slate-50 text-center cursor-pointer transition"
+              >
                 Back
               </button>
               <button
                 type="button"
                 onClick={handleStep2Next}
-                className="inline-flex items-center gap-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs py-2.5 px-5 rounded-xl shadow cursor-pointer active:scale-95 transition"
+                className="w-full sm:w-auto inline-flex items-center justify-center gap-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs py-3 sm:py-2.5 px-6 rounded-xl shadow cursor-pointer active:scale-95 transition"
               >
                 <span>Next: Upload Documents</span>
                 <ArrowRight className="w-4 h-4" />
@@ -347,26 +358,26 @@ export default function ApplyConnectionPage() {
 
         {step === 3 && (
           <div className="space-y-4">
-            <h2 className="text-sm font-bold text-slate-800 uppercase">Step 3: Upload Mandatory Supporting Documents</h2>
-            <p className="text-xs text-slate-500">{uploadGuidanceText()}</p>
+            <h2 className="text-xs sm:text-sm font-bold text-slate-800 uppercase tracking-wide">Step 3: Upload Mandatory Supporting Documents</h2>
+            <p className="text-xs text-slate-500 leading-relaxed">{uploadGuidanceText()}</p>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="p-4 border border-dashed border-slate-300 rounded-xl space-y-2 text-center">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+              <div className="p-3.5 sm:p-4 border border-dashed border-slate-300 rounded-xl space-y-2 text-center bg-slate-50/50 hover:bg-slate-50 transition">
                 <Upload className="w-6 h-6 text-slate-400 mx-auto" />
                 <p className="text-xs font-bold text-slate-700">Identity Proof (Aadhaar / PAN)</p>
-                <input type="file" accept={ACCEPT_ATTR} onChange={(e) => handleFileUpload(e, 'AADHAAR_CARD')} className="text-xs text-slate-500" />
+                <input type="file" accept={ACCEPT_ATTR} onChange={(e) => handleFileUpload(e, 'AADHAAR_CARD')} className="w-full text-xs text-slate-500 file:mr-2 file:py-1 file:px-2.5 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-amber-100 file:text-amber-800 hover:file:bg-amber-200 cursor-pointer" />
               </div>
 
-              <div className="p-4 border border-dashed border-slate-300 rounded-xl space-y-2 text-center">
+              <div className="p-3.5 sm:p-4 border border-dashed border-slate-300 rounded-xl space-y-2 text-center bg-slate-50/50 hover:bg-slate-50 transition">
                 <Upload className="w-6 h-6 text-slate-400 mx-auto" />
                 <p className="text-xs font-bold text-slate-700">Ownership / Lease Proof</p>
-                <input type="file" accept={ACCEPT_ATTR} onChange={(e) => handleFileUpload(e, 'OWNERSHIP_PROOF')} className="text-xs text-slate-500" />
+                <input type="file" accept={ACCEPT_ATTR} onChange={(e) => handleFileUpload(e, 'OWNERSHIP_PROOF')} className="w-full text-xs text-slate-500 file:mr-2 file:py-1 file:px-2.5 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-amber-100 file:text-amber-800 hover:file:bg-amber-200 cursor-pointer" />
               </div>
             </div>
 
             {optimizingFile && (
               <p className="flex items-center gap-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
-                <Loader2 className="w-3.5 h-3.5 animate-spin" /> Optimizing image… large photos are compressed in your browser before upload.
+                <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" /> Optimizing image… large photos are compressed in your browser before upload.
               </p>
             )}
 
@@ -375,21 +386,25 @@ export default function ApplyConnectionPage() {
                 <p className="font-bold">Uploaded Documents ({uploadedDocs.length}):</p>
                 {uploadedDocs.map((doc, idx) => (
                   <p key={idx} className="flex items-center gap-1">
-                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
                     <span>{doc.documentName} ({doc.documentType})</span>
                   </p>
                 ))}
               </div>
             )}
 
-            <div className="flex justify-center gap-3 pt-2">
-              <button type="button" onClick={() => setStep(2)} className="px-4 py-2 rounded-xl border text-xs font-bold text-slate-600">
+            <div className="flex flex-col-reverse sm:flex-row justify-center items-stretch sm:items-center gap-2.5 pt-2 w-full">
+              <button
+                type="button"
+                onClick={() => setStep(2)}
+                className="w-full sm:w-auto px-5 py-2.5 rounded-xl border border-slate-300 text-xs font-bold text-slate-600 hover:bg-slate-50 text-center cursor-pointer transition"
+              >
                 Back
               </button>
               <button
                 type="button"
                 onClick={() => setStep(4)}
-                className="inline-flex items-center gap-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs py-2.5 px-5 rounded-xl shadow"
+                className="w-full sm:w-auto inline-flex items-center justify-center gap-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs py-3 sm:py-2.5 px-6 rounded-xl shadow cursor-pointer active:scale-95 transition"
               >
                 <span>Next: Final Review</span>
                 <ArrowRight className="w-4 h-4" />
@@ -400,8 +415,8 @@ export default function ApplyConnectionPage() {
 
         {step === 4 && (
           <div className="space-y-4">
-            <h2 className="text-sm font-bold text-slate-800 uppercase">Step 4: Application Summary Review</h2>
-            <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 text-xs space-y-2 text-slate-700">
+            <h2 className="text-xs sm:text-sm font-bold text-slate-800 uppercase tracking-wide">Step 4: Application Summary Review</h2>
+            <div className="bg-slate-50 p-3.5 sm:p-4 rounded-xl border border-slate-200 text-xs space-y-2 text-slate-700">
               <p>
                 <span className="font-bold">Connection Type:</span> {connectionTypeVal}
               </p>
@@ -416,14 +431,18 @@ export default function ApplyConnectionPage() {
               </p>
             </div>
 
-            <div className="flex justify-center gap-3 pt-2">
-              <button type="button" onClick={() => setStep(3)} className="px-4 py-2 rounded-xl border text-xs font-bold text-slate-600">
+            <div className="flex flex-col-reverse sm:flex-row justify-center items-stretch sm:items-center gap-2.5 pt-2 w-full">
+              <button
+                type="button"
+                onClick={() => setStep(3)}
+                className="w-full sm:w-auto px-5 py-2.5 rounded-xl border border-slate-300 text-xs font-bold text-slate-600 hover:bg-slate-50 text-center cursor-pointer transition"
+              >
                 Back
               </button>
               <button
                 type="submit"
                 disabled={isSubmitting}
-                className="inline-flex items-center gap-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold text-xs py-3 px-6 rounded-xl shadow-lg transition disabled:opacity-50"
+                className="w-full sm:w-auto inline-flex items-center justify-center gap-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold text-xs py-3 px-6 rounded-xl shadow-lg transition disabled:opacity-50 cursor-pointer active:scale-95"
               >
                 <span>{isSubmitting ? 'Submitting Application...' : 'Submit Application'}</span>
               </button>

@@ -22,17 +22,8 @@ const start = async (): Promise<void> => {
     logger.info('Auth service running', { port: config.PORT, env: config.NODE_ENV });
   });
 
-  const shutdown = async (signal: string): Promise<void> => {
-    logger.info(`${signal} received — shutting down Auth service gracefully`);
-    server.close(async () => {
-      await disconnectDatabase();
-      logger.info('Auth service server closed.');
-      process.exit(0);
-    });
-  };
-
-  process.on('SIGTERM', () => shutdown('SIGTERM'));
-  process.on('SIGINT', () => shutdown('SIGINT'));
+  process.on('SIGTERM', () => logger.info('SIGTERM received — keeping Auth service running 24/7 (shutdown ignored)'));
+  process.on('SIGINT', () => logger.info('SIGINT received — keeping Auth service running 24/7 (shutdown ignored)'));
 };
 
 start().catch((err: unknown) => {

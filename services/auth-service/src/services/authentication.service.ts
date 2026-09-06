@@ -272,10 +272,7 @@ export class AuthenticationService {
       );
     }
 
-    // 4. Successful login — update last login timestamp and reset failed attempts
-    await userRepository.updateLastLogin(user.id);
-
-    // 5. Issue JWT tokens
+    // 4. Issue JWT tokens
     const accessToken = tokenService.generateAccessToken({
       userId: user.id,
       username: user.username,
@@ -290,20 +287,23 @@ export class AuthenticationService {
     const refreshTokenExpiresAt = new Date(
       Date.now() + (dto.rememberMe ? 30 : 7) * 24 * 60 * 60 * 1000,
     );
-    await refreshTokenRepository.createRefreshToken({
-      userId: user.id,
-      tokenHash: refreshTokenHash,
-      expiresAt: refreshTokenExpiresAt,
-    });
 
-    // 6. Audit log
-    await auditService.logAction({
-      userId: user.id,
-      performedBy: user.username,
-      action: AuditAction.USER_LOGIN,
-      module: 'AUTH',
-      ipAddress: dto.ipAddress,
-    });
+    // 5. Run DB operations concurrently (create refresh token, update last login, write audit log)
+    await Promise.all([
+      refreshTokenRepository.createRefreshToken({
+        userId: user.id,
+        tokenHash: refreshTokenHash,
+        expiresAt: refreshTokenExpiresAt,
+      }),
+      userRepository.updateLastLogin(user.id),
+      auditService.logAction({
+        userId: user.id,
+        performedBy: user.username,
+        action: AuditAction.USER_LOGIN,
+        module: 'AUTH',
+        ipAddress: dto.ipAddress,
+      }),
+    ]);
 
     return {
       user: this.sanitizeUser(user),
