@@ -1,5 +1,14 @@
-import { ConnectionStatus, AuditAction, WorkflowActionType, VerificationResult, DocumentStatus, AssignmentStatus, Prisma, User } from '@prisma/client';
-import { ConflictError, NotFoundError, ValidationError, toDocumentViews } from '@bses/shared';
+import {
+  ConnectionStatus,
+  AuditAction,
+  WorkflowActionType,
+  VerificationResult,
+  DocumentStatus,
+  AssignmentStatus,
+  Prisma,
+  User,
+} from '@prisma/client';
+import { ConflictError, NotFoundError, ValidationError, toDocumentViews, createLogger } from '@bses/shared';
 import { connectionRepository } from '../repositories/connection.repository';
 import { workflowRepository } from '../repositories/workflow.repository';
 import { documentRepository } from '../repositories/document.repository';
@@ -7,8 +16,15 @@ import { userRepository } from '../repositories/user.repository';
 import { auditRepository } from '../repositories/audit.repository';
 import { notificationClient } from './notification.client';
 import { encryptionService } from '@bses/shared';
-import { ADMIN_ROLES, connectionWorkflow, WORKFLOW_ACTION_LABELS, IN_PROGRESS_STATUSES, SUCCESS_STATUSES } from '../config/connectionWorkflow';
+import {
+  ADMIN_ROLES,
+  connectionWorkflow,
+  WORKFLOW_ACTION_LABELS,
+  IN_PROGRESS_STATUSES,
+  SUCCESS_STATUSES,
+} from '../config/connectionWorkflow';
 import { assessDocumentCompleteness } from '../config/requiredDocuments';
+const logger = createLogger({ service: 'consumer-workflow' });
 
 export interface Actor {
   id: string;
@@ -36,10 +52,18 @@ interface TransitionInput {
 }
 
 export class WorkflowService {
-  private assertOwner(connection: any, actorId: string): void {
-    if (connection.userId !== actorId) {
-      throw new ValidationError('Access denied to this connection application');
+  private assertOwner(connection: any, actor: Actor): void {
+    // Allow ownership by either the user's DB id OR their CA/meter identifiers
+    // (some legacy connections may reference the user by profile number).
+    const userId = connection.userId ?? connection.user?.id;
+    const caNumber = connection.user?.caNumber ?? connection.caNumber;
+    const meterNumber = connection.user?.meterNumber ?? connection.meterNumber;
+    const actorId = actor.id;
+    const actorProfile = actor.username; // fallback identity check
+    if (userId === actorId || caNumber === actorProfile || meterNumber === actorProfile) {
+      return;
     }
+    throw new ValidationError('Access denied to this connection application');
   }
 
   private formatOfficerName(user: User): string {
@@ -52,8 +76,13 @@ export class WorkflowService {
     return connection;
   }
 
-  private async notifyConsumer(connection: any, notify: (mobile: string, userId?: string) => Promise<void>): Promise<void> {
-    const mobile = connection.user?.mobileEncrypted ? encryptionService.decrypt(connection.user.mobileEncrypted) : null;
+  private async notifyConsumer(
+    connection: any,
+    notify: (mobile: string, userId?: string) => Promise<void>,
+  ): Promise<void> {
+    const mobile = connection.user?.mobileEncrypted
+      ? encryptionService.decrypt(connection.user.mobileEncrypted)
+      : null;
     if (mobile) await notify(mobile, connection.user?.id);
   }
 
@@ -114,16 +143,25 @@ export class WorkflowService {
 
   // ── Consumer actions ─────────────────────────────────────────────────────────
 
-  public async submitApplication(connectionId: string, actor: Actor, ipAddress: string, comment?: string, requestId?: string): Promise<any> {
+  public async submitApplication(
+    connectionId: string,
+    actor: Actor,
+    ipAddress: string,
+    comment?: string,
+    requestId?: string,
+  ): Promise<any> {
     const connection = await this.loadConnection(connectionId);
-    this.assertOwner(connection, actor.id);
+    this.assertOwner(connection, actor);
 
     // Completeness gate: every required document group must be satisfied by an
     // acceptable upload (present, readable, not flagged for manual review).
     // When the gate fails the application is auto-held in DOCUMENTS_PENDING
     // instead of advancing — the consumer is told exactly which group blocked
     // it, both on screen and via SMS/WhatsApp ("Document verification pending").
-    const assessment = assessDocumentCompleteness(connection.documents ?? [], connection.connectionType);
+    const assessment = assessDocumentCompleteness(
+      connection.documents ?? [],
+      connection.connectionType,
+    );
 
     if (!assessment.complete) {
       const notes =
@@ -145,13 +183,20 @@ export class WorkflowService {
       });
 
       await this.notifyConsumer(updated, (mobile, userId) =>
-        notificationClient.notifyDocumentVerificationPending(mobile, updated.applicationNumber, userId),
+        notificationClient.notifyDocumentVerificationPending(
+          mobile,
+          updated.applicationNumber,
+          userId,
+        ),
       );
 
       return updated;
     }
 
-    const to = connection.status === ConnectionStatus.DRAFT ? ConnectionStatus.SUBMITTED : ConnectionStatus.UNDER_VERIFICATION;
+    const to =
+      connection.status === ConnectionStatus.DRAFT
+        ? ConnectionStatus.SUBMITTED
+        : ConnectionStatus.UNDER_VERIFICATION;
 
     const { connection: updated } = await this.transition({
       connection,
@@ -202,9 +247,13 @@ export class WorkflowService {
       to: ConnectionStatus.ASSIGNED,
       actor,
       ipAddress,
-      auditAction: isReassign ? AuditAction.APPLICATION_REASSIGNED : AuditAction.APPLICATION_ASSIGNED,
+      auditAction: isReassign
+        ? AuditAction.APPLICATION_REASSIGNED
+        : AuditAction.APPLICATION_ASSIGNED,
       ...(comment !== undefined && { comment }),
-      notes: isReassign ? `Reassigned to ${this.formatOfficerName(assignee)}` : `Assigned to ${this.formatOfficerName(assignee)}`,
+      notes: isReassign
+        ? `Reassigned to ${this.formatOfficerName(assignee)}`
+        : `Assigned to ${this.formatOfficerName(assignee)}`,
       ...(requestId !== undefined && { requestId }),
     });
 
@@ -224,13 +273,24 @@ export class WorkflowService {
     });
 
     await this.notifyConsumer(updated, (mobile, userId) =>
-      notificationClient.notifyApplicationAssigned(mobile, updated.applicationNumber, this.formatOfficerName(assignee), userId),
+      notificationClient.notifyApplicationAssigned(
+        mobile,
+        updated.applicationNumber,
+        this.formatOfficerName(assignee),
+        userId,
+      ),
     );
 
     return updated;
   }
 
-  public async startVerification(connectionId: string, actor: Actor, ipAddress: string, comment?: string, requestId?: string): Promise<any> {
+  public async startVerification(
+    connectionId: string,
+    actor: Actor,
+    ipAddress: string,
+    comment?: string,
+    requestId?: string,
+  ): Promise<any> {
     const connection = await this.loadConnection(connectionId);
 
     const { connection: updated } = await this.transition({
@@ -307,7 +367,10 @@ export class WorkflowService {
       ...(opts.comment !== undefined && { comment: opts.comment }),
       ...(opts.documentVerdicts !== undefined && {
         metadata: {
-          documentVerdicts: opts.documentVerdicts.map((v) => ({ documentId: v.documentId, action: v.action })),
+          documentVerdicts: opts.documentVerdicts.map((v) => ({
+            documentId: v.documentId,
+            action: v.action,
+          })),
         },
       }),
       ...(requestId !== undefined && { requestId }),
@@ -319,7 +382,9 @@ export class WorkflowService {
 
       await documentRepository.updateStatus(
         verdict.documentId,
-        verdict.action === VerificationResult.APPROVED ? DocumentStatus.VERIFIED : DocumentStatus.REJECTED,
+        verdict.action === VerificationResult.APPROVED
+          ? DocumentStatus.VERIFIED
+          : DocumentStatus.REJECTED,
       );
 
       await workflowRepository.recordVerification({
@@ -340,7 +405,13 @@ export class WorkflowService {
     return updated;
   }
 
-  public async approveApplication(connectionId: string, actor: Actor, ipAddress: string, comment?: string, requestId?: string): Promise<any> {
+  public async approveApplication(
+    connectionId: string,
+    actor: Actor,
+    ipAddress: string,
+    comment?: string,
+    requestId?: string,
+  ): Promise<any> {
     const connection = await this.loadConnection(connectionId);
 
     const { connection: updated } = await this.transition({
@@ -383,7 +454,12 @@ export class WorkflowService {
     });
 
     await this.notifyConsumer(updated, (mobile, userId) =>
-      notificationClient.notifyApplicationRejected(mobile, updated.applicationNumber, opts.reason, userId),
+      notificationClient.notifyApplicationRejected(
+        mobile,
+        updated.applicationNumber,
+        opts.reason,
+        userId,
+      ),
     );
 
     return updated;
@@ -411,13 +487,24 @@ export class WorkflowService {
     });
 
     await this.notifyConsumer(updated, (mobile, userId) =>
-      notificationClient.notifyConnectionScheduled(mobile, updated.applicationNumber, opts.scheduledDate, userId),
+      notificationClient.notifyConnectionScheduled(
+        mobile,
+        updated.applicationNumber,
+        opts.scheduledDate,
+        userId,
+      ),
     );
 
     return updated;
   }
 
-  public async completeConnection(connectionId: string, actor: Actor, ipAddress: string, comment?: string, requestId?: string): Promise<any> {
+  public async completeConnection(
+    connectionId: string,
+    actor: Actor,
+    ipAddress: string,
+    comment?: string,
+    requestId?: string,
+  ): Promise<any> {
     const connection = await this.loadConnection(connectionId);
 
     const { connection: updated } = await this.transition({
@@ -438,7 +525,13 @@ export class WorkflowService {
     return updated;
   }
 
-  public async addRemark(connectionId: string, actor: Actor, ipAddress: string, remark: string, requestId?: string): Promise<any> {
+  public async addRemark(
+    connectionId: string,
+    actor: Actor,
+    ipAddress: string,
+    remark: string,
+    requestId?: string,
+  ): Promise<any> {
     const connection = await this.loadConnection(connectionId);
 
     await workflowRepository.recordWorkflowAction({
@@ -483,7 +576,7 @@ export class WorkflowService {
   private async assertViewAccess(connectionId: string, actor: Actor): Promise<any> {
     const connection = await this.loadConnection(connectionId);
     if (actor.role === 'CONSUMER') {
-      this.assertOwner(connection, actor.id);
+      this.assertOwner(connection, actor);
     }
     return connection;
   }
@@ -492,12 +585,15 @@ export class WorkflowService {
     const connection = await connectionRepository.findWorkflowDetail(connectionId);
     if (!connection) throw new NotFoundError('Connection Application');
     if (actor.role === 'CONSUMER') {
-      this.assertOwner(connection, actor.id);
+      this.assertOwner(connection, actor);
     }
 
-    const allowedTransitions = connectionWorkflow
-      .getAllowedTransitions(connection.status, actor.role)
-      .map((rule) => ({ action: rule.action, from: rule.from, to: rule.to, label: rule.label }));
+    // Defensive null handling: missing optional fields must not crash the
+    // response. A single failed document/OCR lookup must not make the whole
+    // application detail page fail.
+    const allowedTransitions = (
+      connectionWorkflow.getAllowedTransitions(connection.status, actor.role) ?? []
+    ).map((rule) => ({ action: rule.action, from: rule.from, to: rule.to, label: rule.label }));
 
     const timeline = (connection.timeline ?? []).map((entry: any) => ({
       ...entry,
@@ -508,10 +604,20 @@ export class WorkflowService {
 
     // Documents are returned as safe views — encrypted OCR columns are stripped
     // and extracted PII is fully decrypted for officers/admins but masked for
-    // consumers (DPDP).
-    const documents = toDocumentViews(connection.documents, {
-      includeSensitive: actor.role !== 'CONSUMER',
-    });
+    // consumers (DPDP). A single failed document/OCR lookup must not make the
+    // whole application detail page fail.
+    let documents: any[] = [];
+    try {
+      documents = toDocumentViews(connection.documents ?? [], {
+        includeSensitive: actor.role !== 'CONSUMER',
+      });
+    } catch (docErr: any) {
+      logger.warn('Document view construction failed for detail response', {
+        connectionId,
+        error: docErr?.message,
+      });
+      documents = [];
+    }
 
     return {
       ...connection,

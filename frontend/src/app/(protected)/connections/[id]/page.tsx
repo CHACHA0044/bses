@@ -30,7 +30,7 @@ export default function ConnectionDetailPage() {
 
   // SWR-backed detail — warmed by the dashboard / list-row PrefetchLink
   // (dataUrl /connections/${id}/detail), so a hovered "Track" link renders instantly.
-  const { data, loading, revalidate } = useApiResource<{ connection: ConnectionDetail }>(
+  const { data, loading, error, revalidate } = useApiResource<{ connection: ConnectionDetail }>(
     id ? `/connections/${id}/detail` : null,
     { enabled: !!id },
   );
@@ -79,7 +79,9 @@ export default function ConnectionDetailPage() {
       // file never reaches the server or wastes an OCR cycle.
       const check = await validateDocumentFile(uploadFile);
       if (!check.ok) {
-        setActionError(check.errors[0] ?? 'This file cannot be uploaded. Please try a different file.');
+        setActionError(
+          check.errors[0] ?? 'This file cannot be uploaded. Please try a different file.',
+        );
         setActionWarning(null);
         setUploading(false);
         e.target.value = '';
@@ -138,8 +140,75 @@ export default function ConnectionDetailPage() {
     return <ConnectionDetailSkeleton />;
   }
 
+  // Distinguish "not found / forbidden / server down" from a real empty result.
+// Previously every error rendered the same generic alert which masked 5xx
+// (gateway timeouts) and 403 (ownership / RBAC denials) as a "missing record".
+  const errorStatus =
+    error && typeof error === 'object' && 'status' in error
+      ? (error as { status?: number }).status
+      : undefined;
+  const errorMessage =
+    error && typeof error === 'object' && 'message' in error
+      ? String((error as { message?: unknown }).message ?? '')
+      : '';
+
+  // Render error alert for any fetch failure (including 5xx, 403, 404, 401, network).
+  // Guard uses two separate branches so TypeScript can narrow `connection` in the second branch.
+  if (error) {
+    let alertType: 'error' | 'warning' = 'error';
+    let title = 'We could not load this application';
+    let body =
+      'Something went wrong while fetching this application. Please try again in a moment.';
+
+    if (errorStatus === 404) {
+      title = 'Application not found';
+      body =
+        "We could not find an application with this ID. It may have been removed, or the link is incorrect.";
+    } else if (errorStatus === 403) {
+      title = 'Access denied';
+      body =
+        'You do not have permission to view this application. If you believe this is a mistake, contact BSES support.';
+      alertType = 'warning';
+    } else if (errorStatus === 401) {
+      title = 'Session expired';
+      body =
+        'Your session has expired. Please log in again to view this application.';
+    } else if (typeof errorStatus === 'number' && errorStatus >= 500) {
+      title = 'Service temporarily unavailable';
+      body =
+        'Our services are temporarily unavailable. Please try again in a few minutes. If the problem persists, contact BSES support.';
+    } else if (!errorStatus && errorMessage) {
+      // Network / DNS / CORS / timeout — no HTTP status reached
+      body = errorMessage;
+    }
+
+    return (
+      <div className="max-w-4xl mx-auto space-y-6 p-2">
+        <AlertSlot show gap={24}>
+          <Alert type={alertType}>
+            <div className="space-y-1">
+              <p className="font-semibold">{title}</p>
+              <p className="text-sm">{body}</p>
+              {errorStatus ? (
+                <p className="text-xs text-slate-500">Reference: HTTP {errorStatus}</p>
+              ) : null}
+            </div>
+          </Alert>
+        </AlertSlot>
+      </div>
+    );
+  }
+
   if (!connection) {
-    return <div className="p-8 text-red-500">Application not found</div>;
+    return (
+      <div className="max-w-4xl mx-auto space-y-6 p-2">
+        <AlertSlot show gap={24}>
+          <Alert type="error">
+            We could not load this application. Please try again or contact BSES support.
+          </Alert>
+        </AlertSlot>
+      </div>
+    );
   }
 
   const events = connection.timeline ?? [];
@@ -150,10 +219,13 @@ export default function ConnectionDetailPage() {
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-6">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-6 border-b border-slate-100">
           <div>
-            <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Application Number</span>
+            <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">
+              Application Number
+            </span>
             <h1 className="text-2xl font-bold text-slate-900">{connection.applicationNumber}</h1>
             <p className="text-xs text-slate-500">
-              Submitted on: {formatDate(connection.createdAt)} · Last updated {formatDateTime(connection.updatedAt)}
+              Submitted on: {formatDate(connection.createdAt)} · Last updated{' '}
+              {formatDateTime(connection.updatedAt)}
             </p>
           </div>
 
@@ -207,9 +279,12 @@ export default function ConnectionDetailPage() {
         <div className="bg-white rounded-2xl border-2 border-amber-200 shadow-sm p-6 space-y-4">
           <div className="flex items-center justify-between gap-3">
             <div>
-              <h2 className="text-sm font-bold text-amber-800 uppercase tracking-wide">Additional Documents Requested</h2>
+              <h2 className="text-sm font-bold text-amber-800 uppercase tracking-wide">
+                Additional Documents Requested
+              </h2>
               <p className="text-xs text-slate-500 mt-1">
-                {uploadGuidanceText()} BSES has requested clearer copies of some documents. Upload them below and resubmit for verification.
+                {uploadGuidanceText()} BSES has requested clearer copies of some documents. Upload
+                them below and resubmit for verification.
               </p>
             </div>
             <Send className="w-6 h-6 text-amber-500 shrink-0" />
@@ -217,7 +292,9 @@ export default function ConnectionDetailPage() {
 
           <div className="flex flex-col sm:flex-row items-stretch sm:items-end gap-3">
             <div className="flex-1">
-              <label className="block text-xs font-semibold text-slate-700 uppercase mb-1">Document Type</label>
+              <label className="block text-xs font-semibold text-slate-700 uppercase mb-1">
+                Document Type
+              </label>
               <select
                 value={docType}
                 onChange={(e) => setDocType(e.target.value)}
@@ -232,7 +309,9 @@ export default function ConnectionDetailPage() {
               </select>
             </div>
             <div className="flex-1">
-              <label className="block text-xs font-semibold text-slate-700 uppercase mb-1">Choose File</label>
+              <label className="block text-xs font-semibold text-slate-700 uppercase mb-1">
+                Choose File
+              </label>
               <input
                 type="file"
                 accept={ACCEPT_ATTR}
@@ -247,13 +326,18 @@ export default function ConnectionDetailPage() {
               disabled={uploading || resubmitting}
               className="inline-flex items-center justify-center gap-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold text-xs py-2.5 px-5 rounded-xl shadow transition disabled:opacity-50"
             >
-              {resubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+              {resubmitting ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Send className="w-4 h-4" />
+              )}
               <span>{resubmitting ? 'Submitting...' : 'Resubmit for Verification'}</span>
             </button>
           </div>
           {optimizing && (
             <p className="flex items-center gap-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
-              <Loader2 className="w-3.5 h-3.5 animate-spin" /> Optimizing image… large photos are compressed in your browser before upload.
+              <Loader2 className="w-3.5 h-3.5 animate-spin" /> Optimizing image… large photos are
+              compressed in your browser before upload.
             </p>
           )}
         </div>
@@ -263,7 +347,9 @@ export default function ConnectionDetailPage() {
       {documents.length > 0 && (
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-4">
           <div className="flex items-center justify-between">
-            <h2 className="text-sm font-bold text-slate-900 uppercase tracking-wide">Uploaded Documents</h2>
+            <h2 className="text-sm font-bold text-slate-900 uppercase tracking-wide">
+              Uploaded Documents
+            </h2>
             <span className="text-xs font-semibold text-slate-400">{documents.length} file(s)</span>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -274,7 +360,8 @@ export default function ConnectionDetailPage() {
           {hasActiveOcr && (
             <p className="flex items-center gap-2 text-xs text-slate-500">
               <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-600" />
-              Document{activeDocs!.length > 1 ? 's are' : ' is'} still being read by OCR — auto-refreshing…
+              Document{activeDocs!.length > 1 ? 's are' : ' is'} still being read by OCR —
+              auto-refreshing…
             </p>
           )}
         </div>
@@ -282,7 +369,9 @@ export default function ConnectionDetailPage() {
 
       {/* Live workflow timeline */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
-        <h2 className="text-sm font-bold text-slate-900 uppercase tracking-wide mb-4">Application Tracking Progress</h2>
+        <h2 className="text-sm font-bold text-slate-900 uppercase tracking-wide mb-4">
+          Application Tracking Progress
+        </h2>
         <ApplicationTimeline events={events} />
       </div>
     </div>

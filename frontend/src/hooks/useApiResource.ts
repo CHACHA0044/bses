@@ -71,7 +71,7 @@ interface UseApiResourceOptions<T = unknown> {
 
 export interface ApiResourceResult<T> {
   data: T | undefined;
-  error: unknown;
+  error: unknown | { message: string; status?: number; }
   loading: boolean;
   isValidating: boolean;
   revalidate: () => Promise<void>;
@@ -138,11 +138,22 @@ export function useApiResource<T = any>(
       setIsValidating(true);
 
       const promise = (async () => {
-        const res = await apiClient.get(targetUrl);
-        if (res.data?.success) {
-          return res.data.data as T;
+        try {
+          const res = await apiClient.get(targetUrl);
+          if (res.data?.success) {
+            return res.data.data as T;
+          }
+          const msg = res.data?.error?.message || 'Request failed';
+          const err = new Error(msg) as Error & { status?: number };
+          err.status = res.status;
+          throw err;
+        } catch (e: any) {
+          const status = e?.response?.status ?? e?.status;
+          const message = e?.response?.data?.error?.message || e?.message || 'Request failed';
+          const err = new Error(message) as Error & { status?: number };
+          err.status = status;
+          throw err;
         }
-        throw new Error(res.data?.error?.message || 'Request failed');
       })().finally(() => {
         const entry = cache.get(targetUrl);
         if (entry?.inFlight === promise) entry.inFlight = null;
@@ -207,11 +218,22 @@ export function prefetchApiResource(
   prefetchAttemptedAt.set(url, Date.now());
 
   const promise = (async () => {
-    const res = await apiClient.get(url);
-    if (res.data?.success) {
-      return res.data.data;
+    try {
+      const res = await apiClient.get(url);
+      if (res.data?.success) {
+        return res.data.data;
+      }
+      const msg = res.data?.error?.message || 'Request failed';
+      const err = new Error(msg) as Error & { status?: number };
+      err.status = res.status;
+      throw err;
+    } catch (e: any) {
+      const status = e?.response?.status ?? e?.status;
+      const message = e?.response?.data?.error?.message || e?.message || 'Request failed';
+      const err = new Error(message) as Error & { status?: number };
+      err.status = status;
+      throw err;
     }
-    throw new Error(res.data?.error?.message || 'Request failed');
   })().finally(() => {
     const entry = cache.get(url);
     if (entry?.inFlight === promise) entry.inFlight = null;
