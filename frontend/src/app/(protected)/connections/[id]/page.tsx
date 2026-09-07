@@ -350,12 +350,26 @@ export default function ConnectionDetailPage() {
             <h2 className="text-sm font-bold text-slate-900 uppercase tracking-wide">
               Uploaded Documents
             </h2>
-            <span className="text-xs font-semibold text-slate-400">{documents.length} file(s)</span>
+            <span className="text-xs font-semibold text-slate-400">
+              {(() => {
+                // Dedupe by id before counting to avoid visual flicker on re-render.
+                const unique = new Map<string, typeof documents[number]>();
+                for (const d of documents) unique.set(d.id, d);
+                return unique.size;
+              })()} file(s)
+            </span>
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {documents.map((doc) => (
-              <DocumentCard key={doc.id} doc={doc} variant="consumer" />
-            ))}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-stretch">
+            {(() => {
+              // Dedupe documents by id (defensive: backend shouldn't return dupes, but
+              // protects against re-render flicker when a poll resolves with the same payload).
+              const seen = new Set<string>();
+              return documents
+                .filter((doc) => (seen.has(doc.id) ? false : (seen.add(doc.id), true)))
+                .map((doc) => (
+                  <DocumentCard key={doc.id} doc={doc} variant="consumer" />
+                ));
+            })()}
           </div>
           {hasActiveOcr && (
             <p className="flex items-center gap-2 text-xs text-slate-500">

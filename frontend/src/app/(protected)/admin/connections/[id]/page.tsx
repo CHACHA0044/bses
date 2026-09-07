@@ -1,4 +1,4 @@
-'use client';
+                      'use client';
 
 import React, { useMemo, useState, useEffect } from 'react';
 import Link from 'next/link';
@@ -519,7 +519,13 @@ export default function AdminConnectionDetailPage() {
           <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-4">
             <div className="flex items-center justify-between">
               <h2 className="text-sm font-bold text-slate-900 uppercase tracking-wide">Uploaded Documents</h2>
-              <span className="text-xs font-semibold text-slate-400">{documents.length} file(s)</span>
+              <span className="text-xs font-semibold text-slate-400">
+                {(() => {
+                  const unique = new Map<string, typeof documents[number]>();
+                  for (const d of documents) unique.set(d.id, d);
+                  return unique.size;
+                })()} file(s)
+              </span>
             </div>
 
             {documents.length === 0 ? (
@@ -527,19 +533,24 @@ export default function AdminConnectionDetailPage() {
                 No documents uploaded yet.
               </p>
             ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {documents.map((doc) => (
-                  <DocumentCard
-                    key={doc.id}
-                    doc={doc}
-                    variant="admin"
-                    actions={
-                      <Button variant="ghost" size="sm" leftIcon={<Eye className="w-4 h-4" />} onClick={() => setPreviewDoc(doc)}>
-                        Preview
-                      </Button>
-                    }
-                  />
-                ))}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-stretch">
+                {(() => {
+                  const seen = new Set<string>();
+                  return documents
+                    .filter((doc) => (seen.has(doc.id) ? false : (seen.add(doc.id), true)))
+                    .map((doc) => (
+                      <DocumentCard
+                        key={doc.id}
+                        doc={doc}
+                        variant="admin"
+                        actions={
+                          <Button variant="ghost" size="sm" leftIcon={<Eye className="w-4 h-4" />} onClick={() => setPreviewDoc(doc)}>
+                            Preview
+                          </Button>
+                        }
+                      />
+                    ));
+                })()}
               </div>
             )}
           </div>

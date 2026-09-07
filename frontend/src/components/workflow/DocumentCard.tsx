@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { FileText, Edit3, Check, X, Shield, Sparkles, Loader2 } from 'lucide-react';
+import { FileText, Edit3, Check, X, Shield, Loader2 } from 'lucide-react';
 import { StatusChip } from '@/components/ui/Badge';
 import { OcrStatusChip } from '@/components/ui/OcrStatusChip';
 import { OcrLowConfidenceFields } from '@/components/ocr/OcrLowConfidenceFields';
@@ -226,9 +226,7 @@ export const DocumentCard: React.FC<DocumentCardProps> = ({
         {hasOcr && (
           <div className="border-t border-slate-200/70 pt-2 space-y-2 text-[11px]">
             <div className="flex items-center justify-between">
-              <span className="font-bold text-slate-700 flex items-center gap-1">
-                <Sparkles className="w-3 h-3 text-amber-500" /> Extracted Data
-              </span>
+              <span className="font-bold text-slate-700">Document Information</span>
               <button
                 type="button"
                 onClick={openModal}

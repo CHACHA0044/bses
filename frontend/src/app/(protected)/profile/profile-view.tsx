@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useAuthStore } from '@/store/authStore';
 import { useApiResource } from '@/hooks/useApiResource';
 import { apiClient } from '@/lib/apiClient';
-import { User, Edit, ShieldCheck, Mail, Phone, Hash, Zap, X, Save, CheckCircle2, AlertCircle, Copy, Check, FileText, Loader2, Pencil } from 'lucide-react';
+import { User, Edit, ShieldCheck, Mail, Phone, Hash, Zap, X, Save, CheckCircle2, AlertCircle, Copy, Check, FileText, Loader2, Pencil, ChevronDown, MapPin } from 'lucide-react';
 import { ProfileSkeleton } from '@/components/ui/Skeleton';
 
 import { createPortal } from 'react-dom';
@@ -496,7 +496,7 @@ function ExtractedFieldModal({ document, fieldKey, onClose, onSaved }: Extracted
 
 const STATUS_BADGE: Record<OcrStatus, { label: string; className: string }> = {
   PROCESSING: { label: 'OCR in progress', className: 'bg-sky-100 text-sky-700' },
-  EXTRACTED: { label: 'Extracted', className: 'bg-emerald-100 text-emerald-700' },
+  EXTRACTED: { label: 'Verified', className: 'bg-emerald-100 text-emerald-700' },
   UNREADABLE: { label: 'Unreadable', className: 'bg-amber-100 text-amber-700' },
   NEEDS_REVIEW: { label: 'Please verify', className: 'bg-rose-100 text-rose-700' },
 };
@@ -522,14 +522,14 @@ function ExtractedDataSection({ documents, onEdit }: ExtractedDataSectionProps) 
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-2">
         <div>
-          <h2 className="text-base font-bold text-slate-900">Extracted Document Data</h2>
+          <h2 className="text-base font-bold text-slate-900">Document Details</h2>
           <p className="text-xs text-slate-500">
             Details read from your uploaded documents. Tap any field to correct it — corrections are flagged for the verification team.
           </p>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 min-w-0">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 min-w-0 items-stretch">
         {documents.map((doc) => {
           const badge = STATUS_BADGE[doc.ocrStatus] ?? STATUS_BADGE.EXTRACTED;
           const fields = DOC_TYPE_FIELDS[doc.documentType] ?? DOC_TYPE_FIELDS.OTHER;
@@ -652,7 +652,22 @@ export function ProfileView({ initialData }: { initialData?: ProfilePayload }) {
 
   // Keep a local copy so edits survive revalidation / re-render.
   useEffect(() => {
-    if (docsData?.documents) setDocs(docsData.documents);
+    if (!docsData?.documents) return;
+    const deduped = (() => {
+      const map = new Map<string, DocumentRecord>();
+      for (const d of docsData.documents) {
+        const existing = map.get(d.id);
+        if (!existing) {
+          map.set(d.id, d);
+        } else {
+          const existingTs = (existing as any).updatedAt ? new Date((existing as any).updatedAt).getTime() : 0;
+          const newTs = (d as any).updatedAt ? new Date((d as any).updatedAt).getTime() : 0;
+          map.set(d.id, newTs >= existingTs ? d : existing);
+        }
+      }
+      return Array.from(map.values());
+    })();
+    setDocs(deduped);
   }, [docsData]);
 
   // Poll while any document is still being OCR'd, so the section flips from
@@ -683,7 +698,7 @@ export function ProfileView({ initialData }: { initialData?: ProfilePayload }) {
   }
 
   const maskedMobile = data?.mobile
-    ? `•••• •• ${String(data.mobile).slice(-4)} (Encrypted)`
+    ? `•••• •• ${String(data.mobile).slice(-4)}`
     : null;
 
   return (

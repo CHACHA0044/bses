@@ -143,7 +143,12 @@ export default function ApplyConnectionPage() {
         });
         setUploadError(null);
         if (res.data.success) {
-          setUploadedDocs((prev) => [...prev, res.data.data.document]);
+          const newDoc = res.data.data.document;
+          // Prevent duplicate document cards: only add if not already in state by id
+          setUploadedDocs((prev) => {
+            if (prev.some((d) => d.id === newDoc.id)) return prev;
+            return [...prev, newDoc];
+          });
           setUploadWarning(null);
         }
       } catch (err: any) {
