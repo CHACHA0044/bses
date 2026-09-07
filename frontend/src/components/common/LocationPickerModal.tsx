@@ -225,6 +225,8 @@ const LeafletMap: React.FC<LeafletMapProps> = ({ initialCenter, onLocationChange
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<any>(null);
   const markerRef = useRef<any>(null);
+  // Holds the cleanup for the resize listener so the effect return can call it.
+  const cleanupRef = useRef<(() => void) | null>(null);
 
   // Stash the latest callback in a ref so the Leaflet event handlers (which
   // are bound once on init) always invoke the most recent closure. This keeps
@@ -248,16 +250,57 @@ const LeafletMap: React.FC<LeafletMapProps> = ({ initialCenter, onLocationChange
           zoom: 14,
           zoomControl: true,
           preferCanvas: true,
-          // Disable a couple of heavy interactions on mobile so dragging the
-          // pin never lags behind a finger.
+          // Mobile-friendly: enable one-finger pan + pinch zoom while still
+          // allowing the surrounding modal to scroll on the landmark/address
+          // sidebar. touchZoom=true gives the user standard mobile-map zoom
+          // gestures; tap=false keeps single-tap to "drop pin" without the
+          // 300 ms click delay; worldCopyJump prevents endless tile loads on
+          // a fast pan past the dateline.
+          touchZoom: true,
+          tap: false,
+          worldCopyJump: true,
+          bounceAtZoomLimits: false,
+          // Drop a few heavy animations so dragging the pin never lags behind
+          // a finger on a low-end Android.
           fadeAnimation: false,
           zoomAnimation: false,
           markerZoomAnimation: false,
+          // Allow the page beneath the map to scroll when the user starts
+          // a touch outside the map's interactive area. Without this, every
+          // touch inside the map is captured by Leaflet and the user cannot
+          // scroll the modal while interacting with the map.
+          keyboard: false,
         });
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
           attribution: '&copy; OpenStreetMap',
           maxZoom: 19,
         }).addTo(map);
+        // Constrain the map so the user can never pan the pin off-screen
+        // into tile-loading dead zones. Doesn't prevent the marker from being
+        // moved, only the viewport.
+        map.setMaxBounds([
+          [6, 68],
+          [38, 98],
+        ]);
+        // Make sure that when the modal is hidden and then re-shown (eg
+        // tab-switch, or after closing the GPS picker overlay), Leaflet
+        // recomputes its container size — otherwise the right portion of the
+        // canvas renders as a gray band.
+        setTimeout(() => map.invalidateSize(), 50);
+        const onResize = () => {
+          try {
+            map.invalidateSize();
+          } catch {
+            /* map was torn down */
+          }
+        };
+        window.addEventListener('resize', onResize);
+        // Stash the cleanup callback so the effect cleanup can detach it.
+        cleanupRef.current = () => window.removeEventListener('resize', onResize);
+        // Expose the map instance to the parent via the container so external
+        // imperative callers (GPS, landmark select) can call invalidateSize
+        // without prop-drilling a ref.
+        (container as HTMLDivElement & { _bsesLeafletMap?: any })._bsesLeafletMap = map;
 
         const customIcon = L.divIcon({
           className: 'custom-map-pin',
@@ -312,6 +355,10 @@ const LeafletMap: React.FC<LeafletMapProps> = ({ initialCenter, onLocationChange
 
     return () => {
       cancelled = true;
+      if (cleanupRef.current) {
+        cleanupRef.current();
+        cleanupRef.current = null;
+      }
       if (mapRef.current) {
         mapRef.current.remove();
         mapRef.current = null;
@@ -524,7 +571,8 @@ const LocationPickerModalComponent: React.FC<LocationPickerModalProps> = ({
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="relative bg-white w-full sm:max-w-4xl h-full sm:h-auto sm:max-h-[90vh] rounded-none sm:rounded-2xl shadow-2xl border border-slate-200/80 overflow-hidden flex flex-col my-0 sm:my-2">
+      {/* Clean modal container - no double borders, no white outer frame */}
+      <div className="relative bg-white w-full sm:max-w-4xl h-full sm:h-auto sm:max-h-[90vh] rounded-none sm:rounded-2xl shadow-2xl overflow-hidden flex flex-col my-0 sm:my-2">
         {/* Modal Header */}
         <div className="px-4 sm:px-5 py-3 sm:py-4 bg-slate-900 text-white flex items-center justify-between shrink-0">
           <div className="flex items-center gap-2.5 min-w-0">
@@ -600,9 +648,9 @@ const LocationPickerModalComponent: React.FC<LocationPickerModalProps> = ({
 
         {/* Modal Body Grid */}
         <div className="flex flex-col md:grid md:grid-cols-12 flex-1 min-h-0 overflow-hidden">
-          {/* Map Area */}
+          {/* Map Area - no inner border, uses the modal's clean outer edge */}
           <div
-            className={`md:col-span-7 lg:col-span-8 relative bg-slate-100 flex flex-col shrink-0 md:shrink border-b md:border-b-0 md:border-r border-slate-200 ${
+            className={`md:col-span-7 lg:col-span-8 relative bg-slate-100 flex flex-col shrink-0 md:shrink overflow-hidden ${
               showMap ? 'h-[280px] sm:h-[340px] md:h-auto md:min-h-[420px]' : 'h-[120px]'
             }`}
           >

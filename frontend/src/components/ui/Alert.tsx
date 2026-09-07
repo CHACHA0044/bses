@@ -59,6 +59,8 @@ export interface AlertProps {
   children: React.ReactNode;
   onClose?: () => void;
   className?: string;
+  /** Auto-dismiss after this many ms. 0 = off. Default: 6000. */
+  autoDismissMs?: number;
 }
 
 export const Alert: React.FC<AlertProps> = ({
@@ -67,7 +69,38 @@ export const Alert: React.FC<AlertProps> = ({
   children,
   onClose,
   className = '',
+  autoDismissMs = 6000,
 }) => {
+  const [visible, setVisible] = React.useState(true);
+  const [dismissing, setDismissing] = React.useState(false);
+  const timerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  React.useEffect(() => {
+    if (autoDismissMs > 0 && onClose) {
+      timerRef.current = setTimeout(() => {
+        setDismissing(true);
+        setTimeout(() => {
+          setVisible(false);
+          onClose();
+        }, 300); // match CSS transition duration
+      }, autoDismissMs);
+    }
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
+  }, [autoDismissMs, onClose, children]);
+
+  const handleClose = () => {
+    if (timerRef.current) clearTimeout(timerRef.current);
+    setDismissing(true);
+    setTimeout(() => {
+      setVisible(false);
+      onClose?.();
+    }, 200);
+  };
+
+  if (!visible) return null;
+
   const c = config[type];
   const Icon = c.icon;
   const displayTitle = title ?? c.label;
@@ -75,7 +108,9 @@ export const Alert: React.FC<AlertProps> = ({
   return (
     <div
       role="alert"
-      className={`flex items-start gap-3 rounded-xl border p-4 ${c.bg} ${c.border} ${c.text} ${className}`}
+      className={`flex items-start gap-3 rounded-xl border p-4 transition-all duration-300 ${
+        dismissing ? 'opacity-0 translate-y-[-4px] scale-95' : 'opacity-100 translate-y-0 scale-100'
+      } ${c.bg} ${c.border} ${c.text} ${className}`}
     >
       <Icon className="mt-0.5 h-4.5 w-4.5 shrink-0" aria-hidden="true" />
       <div className="flex-1 text-sm space-y-0.5">
@@ -84,8 +119,8 @@ export const Alert: React.FC<AlertProps> = ({
       </div>
       {onClose && (
         <button
-          onClick={onClose}
-          className="shrink-0 rounded-md p-0.5 opacity-70 hover:opacity-100 transition"
+          onClick={handleClose}
+          className="shrink-0 rounded-md p-0.5 opacity-70 hover:opacity-100 transition active:scale-90 cursor-pointer"
           aria-label="Dismiss"
         >
           <X className="h-4 w-4" />

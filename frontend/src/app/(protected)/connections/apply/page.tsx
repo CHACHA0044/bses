@@ -154,6 +154,14 @@ export default function ApplyConnectionPage() {
     }
   };
 
+  // Local submission state machine: idle → submitting → submitted → navigating
+  // Using a ref guard for the network call (to prevent double-submits) and a
+  // separate state for the button label so the UI shows "Submitted ✓" clearly
+  // BEFORE the navigation transition happens (otherwise the button briefly
+  // reverts to "Submit Application" and the user thinks the request failed).
+  const [submitState, setSubmitState] = useState<'idle' | 'submitting' | 'submitted'>('idle');
+  const navigatingRef = useRef<string | null>(null);
+
   const onSubmit = async (data: WizardFormData) => {
     // Guard against double-submission using a ref (more reliable than isSubmitting
     // which can flicker if validation fires after submission starts)
@@ -161,6 +169,7 @@ export default function ApplyConnectionPage() {
       return;
     }
     submittingRef.current = true;
+    setSubmitState('submitting');
     setServerError(null);
     try {
       const res = await apiClient.post('/connections/apply', {
@@ -170,11 +179,24 @@ export default function ApplyConnectionPage() {
         submitAttemptId: submitAttemptIdRef.current,
       });
       if (res.data.success) {
-        router.push(`/connections/${res.data.data.connection.id}`);
+        // Mark submitted BEFORE navigating, so the user sees a clear success
+        // indicator on the button (prevents the "did my click register?"
+        // confusion where the button briefly reverts to its idle label).
+        const targetId = res.data.data.connection.id;
+        setSubmitState('submitted');
+        navigatingRef.current = targetId;
+        // Brief delay so the user can perceive the success state. 800ms is
+        // long enough to register visually but short enough not to feel slow.
+        await new Promise((r) => setTimeout(r, 800));
+        router.push(`/connections/${targetId}`);
       }
     } catch (err: any) {
       // Preserve user's data on failure - do NOT clear form state
-      setServerError(err.response?.data?.error?.message || 'Failed to submit application. Your data has been preserved.');
+      setSubmitState('idle');
+      setServerError(
+        err.response?.data?.error?.message ||
+          'Failed to submit application. Your data has been preserved.',
+      );
     } finally {
       submittingRef.current = false;
     }
@@ -430,26 +452,38 @@ export default function ApplyConnectionPage() {
             <p className="text-xs text-slate-500 leading-relaxed">{uploadGuidanceText()}</p>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+              {/* Identity Proof - Styled as a proper button */}
               <div className="p-3.5 sm:p-4 border border-dashed border-slate-300 rounded-xl space-y-2 text-center bg-slate-50/50 hover:bg-slate-50 transition">
                 <Upload className="w-6 h-6 text-slate-400 mx-auto" />
                 <p className="text-xs font-bold text-slate-700">Identity Proof (Aadhaar / PAN)</p>
-                <input
-                  type="file"
-                  accept={ACCEPT_ATTR}
-                  onChange={(e) => handleFileUpload(e, 'AADHAAR_CARD')}
-                  className="w-full text-xs text-slate-500 file:mr-2 file:py-1 file:px-2.5 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-amber-100 file:text-amber-800 hover:file:bg-amber-200 cursor-pointer"
-                />
+                <label className="inline-flex items-center justify-center gap-2 w-full bg-amber-500 hover:bg-amber-400 active:bg-amber-600 text-slate-950 font-bold text-xs py-2.5 px-4 rounded-xl shadow-sm cursor-pointer transition active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 focus-visible:ring-offset-2">
+                  <Upload className="w-3.5 h-3.5" />
+                  <span>Choose File</span>
+                  <input
+                    type="file"
+                    accept={ACCEPT_ATTR}
+                    onChange={(e) => handleFileUpload(e, 'AADHAAR_CARD')}
+                    className="sr-only"
+                    aria-label="Upload Identity Proof document"
+                  />
+                </label>
               </div>
 
+              {/* Ownership Proof - Styled as a proper button */}
               <div className="p-3.5 sm:p-4 border border-dashed border-slate-300 rounded-xl space-y-2 text-center bg-slate-50/50 hover:bg-slate-50 transition">
                 <Upload className="w-6 h-6 text-slate-400 mx-auto" />
                 <p className="text-xs font-bold text-slate-700">Ownership / Lease Proof</p>
-                <input
-                  type="file"
-                  accept={ACCEPT_ATTR}
-                  onChange={(e) => handleFileUpload(e, 'OWNERSHIP_PROOF')}
-                  className="w-full text-xs text-slate-500 file:mr-2 file:py-1 file:px-2.5 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-amber-100 file:text-amber-800 hover:file:bg-amber-200 cursor-pointer"
-                />
+                <label className="inline-flex items-center justify-center gap-2 w-full bg-amber-500 hover:bg-amber-400 active:bg-amber-600 text-slate-950 font-bold text-xs py-2.5 px-4 rounded-xl shadow-sm cursor-pointer transition active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 focus-visible:ring-offset-2">
+                  <Upload className="w-3.5 h-3.5" />
+                  <span>Choose File</span>
+                  <input
+                    type="file"
+                    accept={ACCEPT_ATTR}
+                    onChange={(e) => handleFileUpload(e, 'OWNERSHIP_PROOF')}
+                    className="sr-only"
+                    aria-label="Upload Ownership or Lease Proof document"
+                  />
+                </label>
               </div>
             </div>
 
@@ -474,23 +508,48 @@ export default function ApplyConnectionPage() {
               </div>
             )}
 
-            <div className="flex flex-col-reverse sm:flex-row justify-center items-stretch sm:items-center gap-2.5 pt-2 w-full">
-              <button
-                type="button"
-                onClick={() => setStep(2)}
-                className="w-full sm:w-auto px-5 py-2.5 rounded-xl border border-slate-300 text-xs font-bold text-slate-600 hover:bg-slate-50 text-center cursor-pointer transition"
-              >
-                Back
-              </button>
-              <button
-                type="button"
-                onClick={() => setStep(4)}
-                className="w-full sm:w-auto inline-flex items-center justify-center gap-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs py-3 sm:py-2.5 px-6 rounded-xl shadow cursor-pointer active:scale-95 transition"
-              >
-                <span>Next: Final Review</span>
-                <ArrowRight className="w-4 h-4" />
-              </button>
-            </div>
+            {/* Check if both required documents are uploaded */}
+            {(() => {
+              const hasIdentity = uploadedDocs.some(
+                (d) => d.documentType === 'AADHAAR_CARD' || d.documentType === 'PAN_CARD',
+              );
+              const hasOwnership = uploadedDocs.some((d) => d.documentType === 'OWNERSHIP_PROOF');
+              const bothDocsUploaded = hasIdentity && hasOwnership;
+
+              return (
+                <div className="flex flex-col-reverse sm:flex-row justify-center items-stretch sm:items-center gap-2.5 pt-2 w-full">
+                  <button
+                    type="button"
+                    onClick={() => setStep(2)}
+                    className="w-full sm:w-auto px-5 py-2.5 rounded-xl border border-slate-300 text-xs font-bold text-slate-600 hover:bg-slate-50 text-center cursor-pointer transition"
+                  >
+                    Back
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setStep(4)}
+                    disabled={!bothDocsUploaded}
+                    title={
+                      !bothDocsUploaded
+                        ? 'Please upload both Identity Proof and Ownership/Lease Proof before continuing'
+                        : undefined
+                    }
+                    className={`w-full sm:w-auto inline-flex items-center justify-center gap-2 font-bold text-xs py-3 sm:py-2.5 px-6 rounded-xl shadow transition ${
+                      bothDocsUploaded
+                        ? 'bg-amber-500 hover:bg-amber-400 text-slate-950 cursor-pointer active:scale-95'
+                        : 'bg-slate-200 text-slate-400 cursor-not-allowed'
+                    }`}
+                  >
+                    <span>
+                      {bothDocsUploaded
+                        ? 'Next: Final Review'
+                        : 'Upload Both Documents to Continue'}
+                    </span>
+                    {bothDocsUploaded && <ArrowRight className="w-4 h-4" />}
+                  </button>
+                </div>
+              );
+            })()}
           </div>
         )}
 
@@ -524,10 +583,60 @@ export default function ApplyConnectionPage() {
               </button>
               <button
                 type="submit"
-                disabled={isSubmitting}
-                className="w-full sm:w-auto inline-flex items-center justify-center gap-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold text-xs py-3 px-6 rounded-xl shadow-lg transition disabled:opacity-50 cursor-pointer active:scale-95"
+                disabled={submitState !== 'idle'}
+                aria-live="polite"
+                className={`w-full sm:w-auto inline-flex items-center justify-center gap-2 font-bold text-xs py-3 px-6 rounded-xl shadow-lg transition cursor-pointer active:scale-95 ${
+                  submitState === 'submitted'
+                    ? 'bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-500 hover:to-emerald-600 text-white'
+                    : submitState === 'submitting'
+                      ? 'bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 cursor-wait'
+                      : 'bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950'
+                } disabled:opacity-90`}
               >
-                <span>{isSubmitting ? 'Submitting Application...' : 'Submit Application'}</span>
+                {submitState === 'submitting' && (
+                  <svg
+                    className="animate-spin w-3.5 h-3.5"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    aria-hidden="true"
+                  >
+                    <circle
+                      cx="12"
+                      cy="12"
+                      r="10"
+                      stroke="currentColor"
+                      strokeOpacity="0.25"
+                      strokeWidth="3"
+                    />
+                    <path
+                      d="M22 12a10 10 0 0 1-10 10"
+                      stroke="currentColor"
+                      strokeWidth="3"
+                      strokeLinecap="round"
+                    />
+                  </svg>
+                )}
+                {submitState === 'submitted' && (
+                  <svg
+                    className="w-3.5 h-3.5"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="3"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden="true"
+                  >
+                    <path d="M5 13l4 4L19 7" />
+                  </svg>
+                )}
+                <span>
+                  {submitState === 'submitting'
+                    ? 'Submitting Application...'
+                    : submitState === 'submitted'
+                      ? 'Submitted'
+                      : 'Submit Application'}
+                </span>
               </button>
             </div>
           </div>

@@ -8,7 +8,13 @@ import {
   Prisma,
   User,
 } from '@prisma/client';
-import { ConflictError, NotFoundError, ValidationError, toDocumentViews, createLogger } from '@bses/shared';
+import {
+  ConflictError,
+  NotFoundError,
+  ValidationError,
+  toDocumentViews,
+  createLogger,
+} from '@bses/shared';
 import { connectionRepository } from '../repositories/connection.repository';
 import { workflowRepository } from '../repositories/workflow.repository';
 import { documentRepository } from '../repositories/document.repository';
@@ -603,13 +609,18 @@ export class WorkflowService {
     const { mobileEncrypted, ...user } = connection.user ?? {};
 
     // Documents are returned as safe views — encrypted OCR columns are stripped
-    // and extracted PII is fully decrypted for officers/admins but masked for
-    // consumers (DPDP). A single failed document/OCR lookup must not make the
-    // whole application detail page fail.
+    // and extracted PII is fully decrypted for officers/admins. For CONSUMER role,
+    // we check if the connection belongs to the actor - if so, they can see their
+    // own OCR data (to verify and correct it); otherwise access is denied.
+    // A single failed document/OCR lookup must not make the whole application
+    // detail page fail.
     let documents: any[] = [];
+    const isOwnApplication = actor.role === 'CONSUMER' && connection.userId === actor.id;
     try {
       documents = toDocumentViews(connection.documents ?? [], {
-        includeSensitive: actor.role !== 'CONSUMER',
+        // Owner consumers see their own extracted data; admins/officers see all.
+        // Masking is for OTHER consumers' data, not the owner's own documents.
+        includeSensitive: actor.role !== 'CONSUMER' || isOwnApplication,
       });
     } catch (docErr: any) {
       logger.warn('Document view construction failed for detail response', {

@@ -58,7 +58,13 @@ export type SniffedType = AcceptedMimeType | null;
 
 export const sniffFileType = async (file: File): Promise<SniffedType> => {
   const head = new Uint8Array(await file.slice(0, 16).arrayBuffer());
-  if (head.length >= 8 && head[0] === 0x89 && head[1] === 0x50 && head[2] === 0x4e && head[3] === 0x47) {
+  if (
+    head.length >= 8 &&
+    head[0] === 0x89 &&
+    head[1] === 0x50 &&
+    head[2] === 0x4e &&
+    head[3] === 0x47
+  ) {
     return 'image/png';
   }
   if (head.length >= 3 && head[0] === 0xff && head[1] === 0xd8 && head[2] === 0xff) {
@@ -184,17 +190,13 @@ export const validateDocumentFile = async (file: File): Promise<UploadCheck> => 
     return { ok: errors.length === 0, errors, warnings };
   }
 
-  if (sniffed === 'image/jpeg' && !['.jpg', '.jpeg'].includes(ext)) {
-    errors.push('The file is a JPEG image but has a mismatched file extension. Please rename it to .jpg or .jpeg.');
-  } else if (sniffed === 'image/png' && ext !== '.png') {
-    errors.push('The file is a PNG image but has a mismatched file extension. Please rename it to .png.');
-  } else if (sniffed === 'image/webp' && ext !== '.webp') {
-    errors.push('The file is a WebP image but has a mismatched file extension. Please rename it to .webp.');
-  } else if (sniffed === 'image/avif' && ext !== '.avif') {
-    errors.push('The file is an AVIF image but has a mismatched file extension. Please rename it to .avif.');
-  } else if (sniffed === 'application/pdf' && ext !== '.pdf') {
-    errors.push('The file is a PDF but has a mismatched file extension. Please rename it to .pdf.');
-  }
+  // Accept the file based on its actual content (magic bytes already verified).
+  // We no longer reject files that have a "wrong" file extension because the
+  // user's phone, screenshot tool, or browser may produce a file with an
+  // unexpected extension even when the underlying bytes are valid.
+  // The real check has already passed: we know what the file IS.
+  // Trust the content, not the filename.
+  // Extension checks are intentionally omitted to avoid rejecting real user files.
 
   if (sniffed === 'application/pdf') {
     // PDFs are text-extracted (born-digital documents); no dimension checks.
@@ -221,7 +223,9 @@ export const validateDocumentFile = async (file: File): Promise<UploadCheck> => 
       );
     }
   } else {
-    warnings.push('Could not inspect this image — it may still fail OCR if it is blurry or too dark.');
+    warnings.push(
+      'Could not inspect this image — it may still fail OCR if it is blurry or too dark.',
+    );
   }
 
   const stddev = await assessContrast(file);

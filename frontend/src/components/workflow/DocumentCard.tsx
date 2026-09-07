@@ -43,7 +43,11 @@ const looksMasked = (value: string): boolean => /X/i.test(value);
  * connection detail pages. Renders name/type/size, status chips, and the OCR
  * extracted fields when available with review and correction support.
  */
-export const DocumentCard: React.FC<DocumentCardProps> = ({ doc, variant = 'consumer', actions }) => {
+export const DocumentCard: React.FC<DocumentCardProps> = ({
+  doc,
+  variant = 'consumer',
+  actions,
+}) => {
   const isAdmin = variant === 'admin';
   const hasOcr =
     doc.ocrStatus === 'EXTRACTED' ||
@@ -56,14 +60,14 @@ export const DocumentCard: React.FC<DocumentCardProps> = ({ doc, variant = 'cons
   const [saveError, setSaveError] = useState<string | null>(null);
 
   const [fields, setFields] = useState<Record<string, string>>(() => {
-  const init: Record<string, string> = {};
-  for (const f of EDITABLE_FIELDS) {
-    const raw =
-      (doc.ocrData as Record<string, string | null | undefined> | undefined)?.[f.key] ?? '';
-    init[f.key] = raw || '';
-  }
-  return init;
-});
+    const init: Record<string, string> = {};
+    for (const f of EDITABLE_FIELDS) {
+      const raw =
+        (doc.ocrData as Record<string, string | null | undefined> | undefined)?.[f.key] ?? '';
+      init[f.key] = raw || '';
+    }
+    return init;
+  });
 
   const ocrFields = [
     { key: 'aadhaar', label: 'Aadhaar', value: doc.ocrData?.aadhaar },
@@ -190,12 +194,15 @@ export const DocumentCard: React.FC<DocumentCardProps> = ({ doc, variant = 'cons
               <div className="flex flex-wrap gap-x-4 gap-y-1">
                 {ocrFields.map((f) => (
                   <span key={f.label} className="text-slate-500">
-                    {f.label}: <strong className="font-mono font-bold text-slate-800">{f.value}</strong>
+                    {f.label}:{' '}
+                    <strong className="font-mono font-bold text-slate-800">{f.value}</strong>
                   </span>
                 ))}
               </div>
             ) : (
-              <p className="text-slate-400 italic">Click &quot;Review &amp; Edit&quot; to verify extracted details.</p>
+              <p className="text-slate-400 italic">
+                Click &quot;Review &amp; Edit&quot; to verify extracted details.
+              </p>
             )}
           </div>
         )}
@@ -209,7 +216,9 @@ export const DocumentCard: React.FC<DocumentCardProps> = ({ doc, variant = 'cons
 
         {isAdmin && doc.ocrData?.rawText && (
           <details className="text-[11px] text-slate-500 cursor-pointer">
-            <summary className="font-semibold hover:text-slate-800">View Raw OCR Text Snippet</summary>
+            <summary className="font-semibold hover:text-slate-800">
+              View Raw OCR Text Snippet
+            </summary>
             <pre className="mt-1 p-2 bg-slate-100 rounded text-[10px] whitespace-pre-wrap font-mono max-h-32 overflow-y-auto">
               {doc.ocrData.rawText}
             </pre>
@@ -217,49 +226,64 @@ export const DocumentCard: React.FC<DocumentCardProps> = ({ doc, variant = 'cons
         )}
       </div>
 
-      {/* Review & Edit OCR Data Modal */}
+      {/* Review & Edit OCR Data Modal - polished, full values, mobile-friendly */}
       {isEditing && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-md w-full p-6 space-y-4 shadow-xl border border-slate-200 animate-fade-in-up">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <div>
-                <h3 className="text-sm font-extrabold text-slate-900 flex items-center gap-2">
-                  <Shield className="w-4 h-4 text-amber-500" /> Review Extracted Document Info
+        <div
+          className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center sm:p-4"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setIsEditing(false);
+          }}
+        >
+          <div className="bg-white rounded-t-2xl sm:rounded-2xl w-full sm:max-w-lg max-h-[92vh] sm:max-h-[85vh] flex flex-col shadow-xl border border-slate-200 animate-fade-in-up">
+            <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4 shrink-0">
+              <div className="min-w-0">
+                <h3 className="text-sm sm:text-base font-extrabold text-slate-900 flex items-center gap-2">
+                  <Shield className="w-4 h-4 text-amber-500 shrink-0" /> Review Extracted Document
+                  Info
                 </h3>
-                <p className="text-[11px] text-slate-500 mt-0.5">{doc.documentName}</p>
+                <p className="text-[11px] text-slate-500 mt-0.5 truncate" title={doc.documentName}>
+                  {doc.documentName}
+                </p>
               </div>
               <button
                 type="button"
                 onClick={() => setIsEditing(false)}
-                className="text-slate-400 hover:text-slate-600 rounded-lg p-1"
+                className="text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg p-1.5 transition active:scale-90 cursor-pointer shrink-0 ml-2"
+                aria-label="Close review modal"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
             {saveSuccess && (
-              <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 p-3 rounded-xl text-xs flex items-center gap-2 font-bold">
-                <Check className="w-4 h-4 text-emerald-600" /> Extracted details updated successfully!
+              <div className="mx-5 mt-4 bg-emerald-50 border border-emerald-200 text-emerald-800 p-3 rounded-xl text-xs flex items-center gap-2 font-bold">
+                <Check className="w-4 h-4 text-emerald-600" /> Extracted details updated
+                successfully!
               </div>
             )}
 
             {saveError && (
-              <div className="bg-red-50 border border-red-200 text-red-700 p-3 rounded-xl text-xs font-bold">
+              <div className="mx-5 mt-4 bg-red-50 border border-red-200 text-red-700 p-3 rounded-xl text-xs font-bold">
                 {saveError}
               </div>
             )}
 
-            <form onSubmit={handleSave} className="space-y-3 text-xs">
-              <div className="max-h-72 overflow-y-auto pr-1 space-y-3">
+            <form onSubmit={handleSave} className="flex flex-col flex-1 min-h-0">
+              <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3 text-xs">
+                <p className="text-[11px] text-slate-500 leading-relaxed bg-slate-50 border border-slate-200 rounded-lg p-2.5">
+                  Verify and correct the values extracted from your document. Full values are shown
+                  so you can review and edit them.
+                </p>
                 {EDITABLE_FIELDS.map((f) => (
                   <div key={f.key}>
                     <label className="font-semibold text-slate-700 block mb-1">{f.label}</label>
                     <input
                       type="text"
+                      inputMode={f.mono ? 'text' : 'text'}
                       value={fields[f.key] ?? ''}
                       onChange={(e) => setFields({ ...fields, [f.key]: e.target.value })}
                       placeholder={f.placeholder}
-                      className={`w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs text-slate-900 focus:border-amber-500 ${
+                      className={`w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs text-slate-900 focus:border-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-500/20 transition ${
                         f.mono ? 'font-mono uppercase' : ''
                       }`}
                     />
@@ -267,20 +291,24 @@ export const DocumentCard: React.FC<DocumentCardProps> = ({ doc, variant = 'cons
                 ))}
               </div>
 
-              <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
+              <div className="flex justify-end gap-2 px-5 py-3 border-t border-slate-100 bg-slate-50/50 shrink-0">
                 <button
                   type="button"
                   onClick={() => setIsEditing(false)}
-                  className="px-4 py-2 rounded-xl border text-xs font-bold text-slate-600 hover:bg-slate-50"
+                  className="px-4 py-2.5 rounded-xl border border-slate-300 text-xs font-bold text-slate-600 hover:bg-white transition active:scale-95 cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={saving}
-                  className="inline-flex items-center gap-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs px-4 py-2 rounded-xl shadow transition disabled:opacity-50"
+                  className="inline-flex items-center gap-1.5 bg-amber-500 hover:bg-amber-400 active:bg-amber-600 text-slate-950 font-bold text-xs px-4 py-2.5 rounded-xl shadow transition disabled:opacity-50 active:scale-95 cursor-pointer"
                 >
-                  {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                  {saving ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <Check className="w-3.5 h-3.5" />
+                  )}
                   <span>{saving ? 'Saving...' : 'Save Correction'}</span>
                 </button>
               </div>
