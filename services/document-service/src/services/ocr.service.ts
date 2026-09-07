@@ -2,14 +2,13 @@ import path from 'path';
 import { createWorker, setLogging, OEM, PSM } from 'tesseract.js';
 import pLimit from 'p-limit';
 import { ObjectId } from 'mongodb';
-import { PDFParse } from 'pdf-parse';
+import type { PDFParse } from 'pdf-parse';
 import { getGridFSBucket } from '../db/mongo.client';
 import { getPrismaClient } from '../db/db.client';
 import { encryptionService, createLogger } from '@bses/shared';
 import { DocumentType, Prisma, OcrJobStatus } from '@prisma/client';
 import { buildExtractedResult, selectBestCandidate, OcrCandidateResult, ExtractedData, EXPECTED_FIELD_KEYS } from './ocr/extractors';
-import { prepareImage } from './ocr/preprocess';
-import { decodeQrFromImage } from './ocr/qr';
+import type { PreparedImage } from './ocr/preprocess';
 import { parseQrPayload } from './ocr/qrPayload';
 import { mergeQrAndOcr, MergedExtraction, TRACKED_FIELD_KEYS } from './ocr/qrMerge';
 import { notificationClient } from './notification.client';
@@ -45,7 +44,38 @@ const limiter = pLimit(WORKER_COUNT);
 // Tesseract WASM heap can be large, and on the 512 MB free tier an OCR worker
 // that sits warm between sparse uploads wastes memory for no benefit. Any use
 // (job start) refreshes the idle deadline before acquire.
-const langPath = path.join(process.cwd(), 'assets');
+const langPath = path.resolve(__dirname, '..', '..', 'assets');
+
+// Lazy importers for heavy modules — sharp (~40 MB) and pdf-parse/pdfjs (~30 MB)
+// are only loaded when an actual image or PDF job runs, keeping the idle baseline
+// low enough for the 512 MB free-tier budget.
+
+let PDFParseCtor: typeof PDFParse | null = null;
+const getPdfParse = async (): Promise<typeof PDFParse> => {
+  if (!PDFParseCtor) {
+    const mod = await import('pdf-parse');
+    PDFParseCtor = ((mod as any).PDFParse ?? (mod as any).default?.PDFParse ?? (mod as any).default) as typeof PDFParse;
+  }
+  return PDFParseCtor as typeof PDFParse;
+};
+
+let prepareImageFn: ((input: Buffer) => Promise<PreparedImage>) | null = null;
+const getPrepareImage = async (): Promise<(input: Buffer) => Promise<PreparedImage>> => {
+  if (!prepareImageFn) {
+    const mod = await import('./ocr/preprocess');
+    prepareImageFn = mod.prepareImage;
+  }
+  return prepareImageFn;
+};
+
+let decodeQrFn: ((inputs: Buffer[]) => Promise<string | null>) | null = null;
+const getDecodeQr = async (): Promise<(inputs: Buffer[]) => Promise<string | null>> => {
+  if (!decodeQrFn) {
+    const mod = await import('./ocr/qr');
+    decodeQrFn = mod.decodeQrFromImage;
+  }
+  return decodeQrFn;
+};
 let workers: Tesseract.Worker[] = [];
 let engineReady = false;
 let engineStarting: Promise<void> | null = null;
@@ -520,13 +550,15 @@ export class OcrService {
     // Preprocess decodes the raw upload to pixels in place; the raw file bytes
     // are only needed as a QR candidate, so we drop the reference right after
     // the QR pass to keep peak memory low while Tesseract loads.
+    const prepareImage = await getPrepareImage();
     const prep = await prepareImage(fileBuffer);
 
     const qrCandidates = [fileBuffer, prep.deskewedBuffer];
     if (prep.atBoundary) qrCandidates.push(prep.flatBuffer);
     let qrRaw: string | null = null;
     try {
-      qrRaw = await decodeQrFromImage(qrCandidates);
+      const decodeQr = await getDecodeQr();
+      qrRaw = await decodeQr(qrCandidates);
     } catch (err) {
       logger.warn(`QR decode failed for ${documentId}`, {
         error: err instanceof Error ? err.message : String(err),
@@ -594,6 +626,7 @@ export class OcrService {
     //   - disableFontFace / disableAutoFetch / disableStream → no external
     //     resource fetching, no font rendering of embedded bytes.
     // The page cap (MAX_PDF_PAGES) bounds CPU for decompression-bomb PDFs.
+    const PDFParse = await getPdfParse();
     const parser = new PDFParse({
       data: fileBuffer,
       isEvalSupported: false,

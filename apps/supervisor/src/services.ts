@@ -4,12 +4,11 @@ import path from 'path';
  * Registry of every logical backend service that the supervisor launches as an
  * isolated child process within a single Render Web Service.
  *
- * NOTE: The auth, consumer, and notification services run INSIDE a single
- * merged process (`merged`) to stay inside the free-tier 512 MB budget. The
- * merged process binds three loopback ports (INSIDE_PORT_AUTH/CONSUMER/
- * NOTIFICATION) on 127.0.0.1 — one per embedded app — while sharing a single
- * Prisma client / pg Pool. document stays isolated (OCR is memory-heavy) and
- * gateway is the only public entry.
+ * NOTE: The auth, consumer, notification, and document services run INSIDE a
+ * single merged process (`merged`) to stay inside the free-tier 512 MB budget.
+ * The merged process binds four loopback ports (INSIDE_PORT_AUTH/CONSUMER/
+ * NOTIFICATION/DOCUMENT) on 127.0.0.1 — one per embedded app — while sharing a
+ * single Prisma client / pg Pool. gateway is the only public entry.
  */
 export interface ServiceSpec {
   /** Unique logical name. Used in logs, health reporting, and env var naming. */
@@ -27,9 +26,10 @@ export interface ServiceSpec {
    */
   ports?: number[];
   /**
-   * Working directory for the child. Important because document-service's OCR
-   * resolves `assets/eng.traineddata.gz` relative to process.cwd(), and each
-   * service resolves its `.env`/config relative to its own folder.
+   * Working directory for the child. Each service resolves its own `.env`/
+   * config relative to its folder; the document OCR assets are resolved
+   * relative to the compiled document-service folder (`__dirname`), so the
+   * merged child needs the merged-service cwd for env/config discovery.
    */
   cwd: string;
   /**
@@ -49,9 +49,10 @@ const toPort = (raw: string | undefined, fallback: number): number =>
 
 /**
  * Default specs, with ports overridable via INTERNAL_PORT_<NAME> env vars.
- * `merged` aggregates the auth (3010), consumer (3011), and notification (3013)
- * apps into one process but still exposes each embedded app on its own port so
- * the gateway proxy table and internal `*_SERVICE_URL` values remain unchanged.
+ * `merged` aggregates the auth (3010), consumer (3011), notification (3013),
+ * and document (3012) apps into one process but still exposes each embedded app
+ * on its own port so the gateway proxy table and internal `*_SERVICE_URL`
+ * values remain unchanged.
  */
 export const getServices = (env: NodeJS.ProcessEnv = process.env): ServiceSpec[] => {
   const authPort = toPort(env['INTERNAL_PORT_AUTH'], 3010);
@@ -71,15 +72,8 @@ export const getServices = (env: NodeJS.ProcessEnv = process.env): ServiceSpec[]
       name: 'merged',
       entry: path.join('services', 'merged-service', 'dist', 'server.js'),
       port: authPort,
-      ports: [authPort, consumerPort, notificationPort],
+      ports: [authPort, consumerPort, notificationPort, documentPort],
       cwd: path.join(repoRoot, 'services', 'merged-service'),
-      isGateway: false,
-    },
-    {
-      name: 'document',
-      entry: path.join('services', 'document-service', 'dist', 'server.js'),
-      port: documentPort,
-      cwd: path.join(repoRoot, 'services', 'document-service'),
       isGateway: false,
     },
   ];
@@ -112,7 +106,6 @@ export const buildGatewayEnv = (
   const envFor = new Map(services.map((s) => [s.name, s]));
   const gateway = envFor.get('gateway');
   const merged = envFor.get('merged');
-  const document = envFor.get('document');
 
   const mergedPorts = merged ? merged.ports ?? [merged.port] : [];
 
@@ -128,8 +121,8 @@ export const buildGatewayEnv = (
     NOTIFICATION_SERVICE_URL: merged
       ? loopback(mergedPorts[2] ?? merged.port)
       : env['NOTIFICATION_SERVICE_URL'],
-    DOCUMENT_SERVICE_URL: document
-      ? loopback(documentPort(services, env))
+    DOCUMENT_SERVICE_URL: merged
+      ? loopback(mergedPorts[3] ?? merged.port)
       : env['DOCUMENT_SERVICE_URL'],
   };
 };
@@ -156,10 +149,3 @@ export const buildServiceEnv = (
     PORT: String(spec.port),
   };
 };
-
-// Internal helper to keep the document upstream aligned with inherited overrides.
-function documentPort(services: ServiceSpec[], env: NodeJS.ProcessEnv): number {
-  const document = services.find((s) => s.name === 'document');
-  if (document) return document.port;
-  return toPort(env['INTERNAL_PORT_DOCUMENT'], 3012);
-}
