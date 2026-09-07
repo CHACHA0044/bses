@@ -1,6 +1,7 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { FileText, Edit3, Check, X, Shield, Sparkles, Loader2 } from 'lucide-react';
 import { StatusChip } from '@/components/ui/Badge';
 import { OcrStatusChip } from '@/components/ui/OcrStatusChip';
@@ -19,7 +20,7 @@ interface DocumentCardProps {
 
 /** Fields a consumer/owner may correct; mirrors the backend's editable surface. */
 const EDITABLE_FIELDS: { key: string; label: string; placeholder?: string; mono?: boolean }[] = [
-  { key: 'name', label: 'Extracted Full Name', placeholder: 'Full name as printed on document' },
+  { key: 'name', label: 'Full Name', placeholder: 'Full name as printed on document' },
   { key: 'fatherName', label: 'Father / Guardian Name' },
   { key: 'dob', label: 'Date of Birth (DOB)', placeholder: 'DD/MM/YYYY' },
   { key: 'aadhaar', label: 'Aadhaar Number', placeholder: 'Full 12-digit number', mono: true },
@@ -33,10 +34,6 @@ const EDITABLE_FIELDS: { key: string; label: string; placeholder?: string; mono?
   { key: 'district', label: 'District' },
   { key: 'address', label: 'Address' },
 ];
-
-/** A physically-masked card prints only the last 4 digits — it cannot be corrected to
- *  a full number, so it must be excluded from a correction payload. */
-const looksMasked = (value: string): boolean => /X/i.test(value);
 
 /**
  * DocumentCard — shared uploaded-document tile used by the consumer and admin
@@ -58,24 +55,45 @@ export const DocumentCard: React.FC<DocumentCardProps> = ({
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [mounted, setMounted] = useState(false);
 
+  // Fields state: always use the OCR data directly — NO masking, NO truncation.
+  // The user sees exactly what was extracted so they can verify and correct.
   const [fields, setFields] = useState<Record<string, string>>(() => {
     const init: Record<string, string> = {};
     for (const f of EDITABLE_FIELDS) {
       const raw =
         (doc.ocrData as Record<string, string | null | undefined> | undefined)?.[f.key] ?? '';
-      init[f.key] = raw || '';
+      init[f.key] = typeof raw === 'string' ? raw : '';
     }
     return init;
   });
 
+  useEffect(() => {
+    setMounted(true);
+    return () => setMounted(false);
+  }, []);
+
+  // Sync fields when OCR data changes (e.g., after save)
+  useEffect(() => {
+    const init: Record<string, string> = {};
+    for (const f of EDITABLE_FIELDS) {
+      const raw =
+        (doc.ocrData as Record<string, string | null | undefined> | undefined)?.[f.key] ?? '';
+      init[f.key] = typeof raw === 'string' ? raw : '';
+    }
+    setFields(init);
+  }, [doc.ocrData]);
+
+  // Build the displayed OCR fields list — show ALL non-empty values with
+  // full text. No masking, no partial display.
   const ocrFields = [
+    { key: 'name', label: 'Full Name', value: doc.ocrData?.name },
+    { key: 'fatherName', label: 'Father / Guardian', value: doc.ocrData?.fatherName },
+    { key: 'dob', label: 'DOB', value: doc.ocrData?.dob },
     { key: 'aadhaar', label: 'Aadhaar', value: doc.ocrData?.aadhaar },
     { key: 'pan', label: 'PAN', value: doc.ocrData?.pan },
     { key: 'licenseNumber', label: 'Licence No', value: doc.ocrData?.licenseNumber },
-    { key: 'name', label: 'Name', value: doc.ocrData?.name },
-    { key: 'fatherName', label: 'Father / Guardian', value: doc.ocrData?.fatherName },
-    { key: 'dob', label: 'DOB', value: doc.ocrData?.dob },
     { key: 'validity', label: 'Validity', value: doc.ocrData?.validity || doc.ocrData?.expiryDate },
     { key: 'issueDate', label: 'Issue Date', value: doc.ocrData?.issueDate },
     { key: 'issuingAuthority', label: 'Issuing Authority', value: doc.ocrData?.issuingAuthority },
@@ -83,7 +101,7 @@ export const DocumentCard: React.FC<DocumentCardProps> = ({
     { key: 'state', label: 'State', value: doc.ocrData?.state },
     { key: 'district', label: 'District', value: doc.ocrData?.district },
     { key: 'address', label: 'Address', value: doc.ocrData?.address },
-  ].filter((f) => !!f.value);
+  ].filter((f) => typeof f.value === 'string' && f.value.length > 0);
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -92,13 +110,13 @@ export const DocumentCard: React.FC<DocumentCardProps> = ({
     setSaveSuccess(false);
 
     try {
-      // Never persist a masked/partial Aadhaar — the backend stores the full
-      // 12-digit number and rejects masked corrections (they cannot be read back).
+      // Only send non-empty fields — let the backend handle what was actually edited.
       const payload: Record<string, string> = {};
       for (const f of EDITABLE_FIELDS) {
         const value = fields[f.key] ?? '';
-        if (f.key === 'aadhaar' && value && looksMasked(value)) continue;
-        payload[f.key] = value;
+        if (value.trim().length > 0) {
+          payload[f.key] = value;
+        }
       }
 
       const res = await apiClient.patch(`/documents/${doc.id}/extracted-data`, {
@@ -118,6 +136,36 @@ export const DocumentCard: React.FC<DocumentCardProps> = ({
       setSaving(false);
     }
   };
+
+  const openModal = () => {
+    // Reset fields to current OCR data before opening
+    const init: Record<string, string> = {};
+    for (const f of EDITABLE_FIELDS) {
+      const raw =
+        (doc.ocrData as Record<string, string | null | undefined> | undefined)?.[f.key] ?? '';
+      init[f.key] = typeof raw === 'string' ? raw : '';
+    }
+    setFields(init);
+    setSaveSuccess(false);
+    setSaveError(null);
+    setIsEditing(true);
+  };
+
+  const closeModal = () => {
+    setIsEditing(false);
+    setSaveSuccess(false);
+    setSaveError(null);
+  };
+
+  // Lock body scroll while editing modal is open
+  useEffect(() => {
+    if (!isEditing) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [isEditing]);
 
   return (
     <>
@@ -183,25 +231,28 @@ export const DocumentCard: React.FC<DocumentCardProps> = ({
               </span>
               <button
                 type="button"
-                onClick={() => setIsEditing(true)}
+                onClick={openModal}
                 className="inline-flex items-center gap-1 text-[11px] font-bold text-primary hover:underline cursor-pointer"
               >
-                <Edit3 className="w-3 h-3" /> Review &amp; Edit
+                <Edit3 className="w-3 h-3" /> Review & Edit
               </button>
             </div>
 
             {ocrFields.length > 0 ? (
-              <div className="flex flex-wrap gap-x-4 gap-y-1">
+              <div className="grid grid-cols-1 gap-1">
                 {ocrFields.map((f) => (
-                  <span key={f.label} className="text-slate-500">
-                    {f.label}:{' '}
-                    <strong className="font-mono font-bold text-slate-800">{f.value}</strong>
-                  </span>
+                  <div key={f.key} className="flex gap-2">
+                    <span className="text-slate-500 shrink-0 min-w-[80px]">{f.label}:</span>
+                    {/* Full value, no masking, no truncation. Long values wrap naturally. */}
+                    <span className="text-slate-800 font-medium break-words word-break-break-word">
+                      {f.value}
+                    </span>
+                  </div>
                 ))}
               </div>
             ) : (
               <p className="text-slate-400 italic">
-                Click &quot;Review &amp; Edit&quot; to verify extracted details.
+                Click &ldquo;Review & Edit&rdquo; to verify extracted details.
               </p>
             )}
           </div>
@@ -226,96 +277,149 @@ export const DocumentCard: React.FC<DocumentCardProps> = ({
         )}
       </div>
 
-      {/* Review & Edit OCR Data Modal - polished, full values, mobile-friendly */}
-      {isEditing && (
-        <div
-          className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center sm:p-4"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setIsEditing(false);
-          }}
-        >
-          <div className="bg-white rounded-t-2xl sm:rounded-2xl w-full sm:max-w-lg max-h-[92vh] sm:max-h-[85vh] flex flex-col shadow-xl border border-slate-200 animate-fade-in-up">
-            <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4 shrink-0">
-              <div className="min-w-0">
-                <h3 className="text-sm sm:text-base font-extrabold text-slate-900 flex items-center gap-2">
-                  <Shield className="w-4 h-4 text-amber-500 shrink-0" /> Review Extracted Document
-                  Info
-                </h3>
-                <p className="text-[11px] text-slate-500 mt-0.5 truncate" title={doc.documentName}>
-                  {doc.documentName}
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setIsEditing(false)}
-                className="text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg p-1.5 transition active:scale-90 cursor-pointer shrink-0 ml-2"
-                aria-label="Close review modal"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
+      {/* ── Review & Edit Modal ──────────────────────────────────────────────
+          Rendered via React portal to document.body so it sits ABOVE the
+          sidebar, navbar, and all other page content regardless of the
+          component's position in the DOM tree.
+          
+          Stacking context strategy:
+            - Outer div: position:fixed, inset:0, z-[9998] — backdrop layer
+            - Inner div: position:fixed, inset:0, z-[9999] — dialog layer
+            - This ensures the modal is always above everything else in the app.
+      ──────────────────────────────────────────────────────────────────────── */}
+      {isEditing &&
+        mounted &&
+        createPortal(
+          <div
+            className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="review-modal-title"
+          >
+            {/* Full-viewport dark backdrop — covers navbar + sidebar + page content */}
+            <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-0" aria-hidden="true" />
 
-            {saveSuccess && (
-              <div className="mx-5 mt-4 bg-emerald-50 border border-emerald-200 text-emerald-800 p-3 rounded-xl text-xs flex items-center gap-2 font-bold">
-                <Check className="w-4 h-4 text-emerald-600" /> Extracted details updated
-                successfully!
-              </div>
-            )}
-
-            {saveError && (
-              <div className="mx-5 mt-4 bg-red-50 border border-red-200 text-red-700 p-3 rounded-xl text-xs font-bold">
-                {saveError}
-              </div>
-            )}
-
-            <form onSubmit={handleSave} className="flex flex-col flex-1 min-h-0">
-              <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3 text-xs">
-                <p className="text-[11px] text-slate-500 leading-relaxed bg-slate-50 border border-slate-200 rounded-lg p-2.5">
-                  Verify and correct the values extracted from your document. Full values are shown
-                  so you can review and edit them.
-                </p>
-                {EDITABLE_FIELDS.map((f) => (
-                  <div key={f.key}>
-                    <label className="font-semibold text-slate-700 block mb-1">{f.label}</label>
-                    <input
-                      type="text"
-                      inputMode={f.mono ? 'text' : 'text'}
-                      value={fields[f.key] ?? ''}
-                      onChange={(e) => setFields({ ...fields, [f.key]: e.target.value })}
-                      placeholder={f.placeholder}
-                      className={`w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs text-slate-900 focus:border-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-500/20 transition ${
-                        f.mono ? 'font-mono uppercase' : ''
-                      }`}
-                    />
-                  </div>
-                ))}
-              </div>
-
-              <div className="flex justify-end gap-2 px-5 py-3 border-t border-slate-100 bg-slate-50/50 shrink-0">
+            {/* Modal dialog — above the backdrop, wide enough for form fields,
+              max-height capped so the footer stays accessible on all viewports. */}
+            <div
+              className={[
+                'relative z-10 w-full bg-white rounded-2xl shadow-2xl border border-slate-200',
+                'flex flex-col',
+                // Desktop: wider modal so all fields are readable
+                'max-w-2xl max-h-[90vh]',
+                // Mobile: full-width with rounded top corners (slide-up feel)
+                'sm:max-w-2xl',
+              ].join(' ')}
+            >
+              {/* Fixed header — document name + close button always visible */}
+              <div className="flex items-start justify-between gap-4 px-6 py-5 border-b border-slate-100 shrink-0">
+                <div className="min-w-0">
+                  <h3
+                    id="review-modal-title"
+                    className="text-base font-extrabold text-slate-900 flex items-center gap-2"
+                  >
+                    <Shield className="w-4 h-4 text-amber-500 shrink-0" />
+                    Review Extracted Document Info
+                  </h3>
+                  <p
+                    className="text-[11px] text-slate-500 mt-0.5 truncate"
+                    title={doc.documentName}
+                  >
+                    {doc.documentName}
+                  </p>
+                </div>
                 <button
                   type="button"
-                  onClick={() => setIsEditing(false)}
-                  className="px-4 py-2.5 rounded-xl border border-slate-300 text-xs font-bold text-slate-600 hover:bg-white transition active:scale-95 cursor-pointer"
+                  onClick={closeModal}
+                  className="text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg p-1.5 transition active:scale-90 cursor-pointer shrink-0"
+                  aria-label="Close review modal"
                 >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={saving}
-                  className="inline-flex items-center gap-1.5 bg-amber-500 hover:bg-amber-400 active:bg-amber-600 text-slate-950 font-bold text-xs px-4 py-2.5 rounded-xl shadow transition disabled:opacity-50 active:scale-95 cursor-pointer"
-                >
-                  {saving ? (
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  ) : (
-                    <Check className="w-3.5 h-3.5" />
-                  )}
-                  <span>{saving ? 'Saving...' : 'Save Correction'}</span>
+                  <X className="w-4 h-4" />
                 </button>
               </div>
-            </form>
-          </div>
-        </div>
-      )}
+
+              {/* Success / error banners */}
+              {saveSuccess && (
+                <div className="mx-6 mt-4 bg-emerald-50 border border-emerald-200 text-emerald-800 p-3 rounded-xl text-xs flex items-center gap-2 font-bold shrink-0">
+                  <Check className="w-4 h-4 text-emerald-600 shrink-0" />
+                  Extracted details updated successfully!
+                </div>
+              )}
+
+              {saveError && (
+                <div className="mx-6 mt-4 bg-red-50 border border-red-200 text-red-700 p-3 rounded-xl text-xs font-bold shrink-0">
+                  {saveError}
+                </div>
+              )}
+
+              {/* Scrollable form body — all fields visible and accessible */}
+              <form id="review-form" onSubmit={handleSave} className="flex flex-col flex-1 min-h-0">
+                <div className="flex-1 overflow-y-auto px-6 py-5 space-y-4">
+                  <p className="text-xs text-slate-500 leading-relaxed bg-slate-50 border border-slate-200 rounded-lg p-3">
+                    Verify and correct the values extracted from your document. All detected values
+                    are shown in full so you can review and edit them accurately.
+                  </p>
+
+                  <div className="grid grid-cols-1 gap-4">
+                    {EDITABLE_FIELDS.map((f) => (
+                      <div key={f.key} className="space-y-1.5">
+                        <label
+                          htmlFor={`field-${f.key}`}
+                          className="text-xs font-semibold text-slate-700 block"
+                        >
+                          {f.label}
+                        </label>
+                        <input
+                          id={`field-${f.key}`}
+                          type="text"
+                          inputMode={f.mono ? 'text' : 'text'}
+                          autoComplete="off"
+                          spellCheck={false}
+                          value={fields[f.key] ?? ''}
+                          onChange={(e) => setFields({ ...fields, [f.key]: e.target.value })}
+                          placeholder={f.placeholder}
+                          className={[
+                            'w-full bg-white border border-slate-300 rounded-xl p-3',
+                            'text-sm text-slate-900',
+                            'focus:border-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-500/20',
+                            'transition placeholder:text-slate-400',
+                            'resize-none', // Prevent textarea-like resize on text inputs
+                            f.mono ? 'font-mono uppercase tracking-wider' : '',
+                          ].join(' ')}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Fixed footer — Cancel and Save Correction always accessible */}
+                <div className="flex justify-end gap-3 px-6 py-4 border-t border-slate-100 bg-slate-50/50 shrink-0 rounded-b-2xl">
+                  <button
+                    type="button"
+                    onClick={closeModal}
+                    className="px-5 py-2.5 rounded-xl border border-slate-300 text-sm font-bold text-slate-600 hover:bg-white transition active:scale-95 cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    form="review-form"
+                    disabled={saving}
+                    className="inline-flex items-center gap-2 bg-amber-500 hover:bg-amber-400 active:bg-amber-600 text-slate-950 font-bold text-sm px-5 py-2.5 rounded-xl shadow transition disabled:opacity-50 active:scale-95 cursor-pointer"
+                  >
+                    {saving ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Check className="w-4 h-4" />
+                    )}
+                    <span>{saving ? 'Saving...' : 'Save Correction'}</span>
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>,
+          document.body,
+        )}
     </>
   );
 };

@@ -31,8 +31,14 @@ export interface AdminDashboardPayload {
 export function AdminDashboardView() {
   // Data loads entirely client-side via the SWR cache. The PrefetchProvider
   // warms /admin/dashboard in the background so this usually renders instantly.
-  const { data, error, loading, revalidate } =
-    useApiResource<AdminDashboardPayload>('/admin/dashboard');
+  //
+  // staleMs: 60_000 keeps the dashboard from re-hammering the backend on
+  // re-renders / tab focus. A background refresh is only issued if the cached
+  // data is older than 60 seconds. Explicit revalidate() powers the Retry button.
+  const { data, error, loading, revalidate, isValidating } = useApiResource<AdminDashboardPayload>(
+    '/admin/dashboard',
+    { staleMs: 60_000 },
+  );
   const analytics = data?.analytics;
   const consumers = useMemo(() => analytics?.consumers || { totalActive: 0 }, [analytics]);
   const requests = useMemo(() => analytics?.connectionRequests || {}, [analytics]);

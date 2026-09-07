@@ -17,119 +17,186 @@ export class AdminService {
    * Promise.all for minimum latency. The monthly + daily registration
    * queries are merged into a single user query covering the wider
    * date range, then aggregated in memory.
+   *
+   * DIAGNOSTIC LOGGING: Each stage logs at INFO level with timing
+   * so the root cause can be identified if the dashboard fails.
+   * Elapsed time is tracked to spot slow queries.
+   *
+   * MEMORY SAFETY: This function uses ONLY:
+   *   - Database-side aggregation (COUNT, GROUP BY, date_trunc)
+   *   - Selective field queries with take/limit where applicable
+   *   - No loading of full user/application collections into Node memory
+   *   - No unnecessary document/OCR data loading
    */
   public async getDashboardAnalytics(): Promise<any> {
-    // Widen the date range to cover both monthly (6 months) and daily (14 days)
-    const sixMonthsAgo = new Date();
-    sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 5);
-    sixMonthsAgo.setDate(1);
-    sixMonthsAgo.setHours(0, 0, 0, 0);
+    const requestId = `[ADMIN_DASHBOARD:${Date.now()}]`;
+    const t0 = Date.now();
 
-    // Registration buckets are aggregated IN THE DATABASE (SQL) instead of
-    // pulling `createdAt` for every user into JS memory. The free tier must not
-    // hold thousands of rows just to draw a dashboard line chart.
-    const registrationBucketQuery = this.prisma.$queryRaw<Array<{ bucket: Date; count: bigint }>>`
-      SELECT
-        date_trunc('day', "createdAt")::date                     AS bucket,
-        COUNT(*)::int::bigint                                     AS count
-      FROM "User"
-      WHERE "createdAt" >= ${sixMonthsAgo}
-      GROUP BY date_trunc('day', "createdAt")::date
-      ORDER BY bucket ASC
-    `;
+    try {
+      // Stage 1: Authentication/authorization already done by middleware
+      // (if we reached here, auth-ok)
+      logger.info(`${requestId} start`);
 
-    // Fire ALL independent queries in parallel — no sequential awaits.
-    const [
-      connectionStats,
-      totalConsumers,
-      officers,
-      genderCounts,
-      registrationBuckets,
-      categoryCounts,
-    ] = await Promise.all([
-      connectionRepository.getDashboardStats(),
-      userRepository.countActiveConsumers(),
-      workflowService.listOfficers(),
-      this.prisma.user.groupBy({
-        by: ['gender'],
-        _count: { id: true },
-      }),
-      registrationBucketQuery,
-      this.prisma.connectionRequest.groupBy({
-        by: ['connectionType'],
-        _count: { id: true },
-      }),
-    ]);
+      // Widen the date range to cover both monthly (6 months) and daily (14 days)
+      const sixMonthsAgo = new Date();
+      sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 5);
+      sixMonthsAgo.setDate(1);
+      sixMonthsAgo.setHours(0, 0, 0, 0);
 
-    // ── Gender distribution ──
-    const genderMap: Record<string, number> = { MALE: 0, FEMALE: 0, OTHER: 0, PREFER_NOT_TO_SAY: 0 };
-    genderCounts.forEach((g) => {
-      genderMap[g.gender] = g._count.id;
-    });
+      // Stage 2: Registration buckets — aggregated IN THE DATABASE (SQL)
+      // Only fetches date buckets with counts, not individual user rows.
+      const registrationBucketQuery = this.prisma.$queryRaw<Array<{ bucket: Date; count: bigint }>>`
+        SELECT
+          date_trunc('day', "createdAt")::date                     AS bucket,
+          COUNT(*)::int::bigint                                     AS count
+        FROM "User"
+        WHERE "createdAt" >= ${sixMonthsAgo}
+        GROUP BY date_trunc('day', "createdAt")::date
+        ORDER BY bucket ASC
+      `;
 
-    // ── Monthly Registrations (Past 6 Months) ──
-    const monthlyMap = new Map<string, number>();
-    for (let i = 5; i >= 0; i--) {
-      const d = new Date();
-      d.setMonth(d.getMonth() - i);
-      const label = d.toLocaleString('en-US', { month: 'short', year: 'numeric' });
-      monthlyMap.set(label, 0);
-    }
-    registrationBuckets.forEach(({ bucket, count }) => {
-      const label = new Date(bucket).toLocaleString('en-US', { month: 'short', year: 'numeric' });
-      if (monthlyMap.has(label)) {
-        monthlyMap.set(label, (monthlyMap.get(label) || 0) + Number(count));
+      // Stage 3: All independent queries fire in PARALLEL (Promise.all)
+      // No sequential awaits — minimum latency.
+      const t1 = Date.now();
+      logger.info(`${requestId} querying-summary`);
+
+      const [
+        connectionStats,
+        totalConsumers,
+        officers,
+        genderCounts,
+        registrationBuckets,
+        categoryCounts,
+      ] = await Promise.all([
+        connectionRepository.getDashboardStats(),
+        userRepository.countActiveConsumers(),
+        workflowService.listOfficers(),
+        // Database-side GROUP BY — no user rows loaded into memory
+        this.prisma.user.groupBy({
+          by: ['gender'],
+          _count: { id: true },
+        }),
+        // Raw SQL aggregation — returns only date buckets, not user data
+        registrationBucketQuery,
+        // Database-side GROUP BY — no connection rows loaded
+        this.prisma.connectionRequest.groupBy({
+          by: ['connectionType'],
+          _count: { id: true },
+        }),
+      ]);
+
+      const t2 = Date.now();
+      logger.info(`${requestId} queries-complete elapsed=${t2 - t1}ms`);
+
+      // Stage 4: In-memory aggregation (only small maps/arrays, bounded data)
+      // These are just JavaScript Maps with one entry per day/month, not full datasets.
+
+      // ── Gender distribution ──
+      const genderMap: Record<string, number> = {
+        MALE: 0,
+        FEMALE: 0,
+        OTHER: 0,
+        PREFER_NOT_TO_SAY: 0,
+      };
+      genderCounts.forEach((g) => {
+        genderMap[g.gender] = g._count.id;
+      });
+
+      // ── Monthly Registrations (Past 6 Months) ──
+      // Only 6 entries max — negligible memory footprint
+      const monthlyMap = new Map<string, number>();
+      for (let i = 5; i >= 0; i--) {
+        const d = new Date();
+        d.setMonth(d.getMonth() - i);
+        const label = d.toLocaleString('en-US', { month: 'short', year: 'numeric' });
+        monthlyMap.set(label, 0);
       }
-    });
-    const monthlyRegistrations = Array.from(monthlyMap.entries()).map(([month, count]) => ({ month, count }));
-
-    // ── Daily Registrations (Past 14 Days) ──
-    const fourteenDaysAgo = new Date();
-    fourteenDaysAgo.setDate(fourteenDaysAgo.getDate() - 13);
-    fourteenDaysAgo.setHours(0, 0, 0, 0);
-    const dailyMap = new Map<string, number>();
-    for (let i = 13; i >= 0; i--) {
-      const d = new Date();
-      d.setDate(d.getDate() - i);
-      const label = d.toLocaleString('en-US', { month: 'short', day: 'numeric' });
-      dailyMap.set(label, 0);
-    }
-    registrationBuckets.forEach(({ bucket, count }) => {
-      const day = new Date(bucket);
-      if (day >= fourteenDaysAgo) {
-        const label = day.toLocaleString('en-US', { month: 'short', day: 'numeric' });
-        if (dailyMap.has(label)) {
-          dailyMap.set(label, (dailyMap.get(label) || 0) + Number(count));
+      registrationBuckets.forEach(({ bucket, count }) => {
+        const label = new Date(bucket).toLocaleString('en-US', { month: 'short', year: 'numeric' });
+        if (monthlyMap.has(label)) {
+          monthlyMap.set(label, (monthlyMap.get(label) || 0) + Number(count));
         }
+      });
+      const monthlyRegistrations = Array.from(monthlyMap.entries()).map(([month, count]) => ({
+        month,
+        count,
+      }));
+
+      // ── Daily Registrations (Past 14 Days) ──
+      // Only 14 entries max — negligible memory footprint
+      const fourteenDaysAgo = new Date();
+      fourteenDaysAgo.setDate(fourteenDaysAgo.getDate() - 13);
+      fourteenDaysAgo.setHours(0, 0, 0, 0);
+      const dailyMap = new Map<string, number>();
+      for (let i = 13; i >= 0; i--) {
+        const d = new Date();
+        d.setDate(d.getDate() - i);
+        const label = d.toLocaleString('en-US', { month: 'short', day: 'numeric' });
+        dailyMap.set(label, 0);
       }
-    });
-    const dailyRegistrations = Array.from(dailyMap.entries()).map(([day, count]) => ({ day, count }));
+      registrationBuckets.forEach(({ bucket, count }) => {
+        const day = new Date(bucket);
+        if (day >= fourteenDaysAgo) {
+          const label = day.toLocaleString('en-US', { month: 'short', day: 'numeric' });
+          if (dailyMap.has(label)) {
+            dailyMap.set(label, (dailyMap.get(label) || 0) + Number(count));
+          }
+        }
+      });
+      const dailyRegistrations = Array.from(dailyMap.entries()).map(([day, count]) => ({
+        day,
+        count,
+      }));
 
-    // ── Connection Trends ──
-    const connectionTrends = categoryCounts.map((c) => ({
-      category: c.connectionType,
-      count: c._count.id,
-    }));
+      // ── Connection Trends ──
+      const connectionTrends = categoryCounts.map((c) => ({
+        category: c.connectionType,
+        count: c._count.id,
+      }));
 
-    return {
-      consumers: {
-        totalActive: totalConsumers,
-        genderDistribution: genderMap,
-        monthlyRegistrations,
-        dailyRegistrations,
-      },
-      connectionRequests: {
-        ...connectionStats,
-        trends: connectionTrends,
-      },
-      officers: {
-        totalActive: officers.length,
-        list: officers,
-      },
-    };
+      const result = {
+        consumers: {
+          totalActive: totalConsumers,
+          genderDistribution: genderMap,
+          monthlyRegistrations,
+          dailyRegistrations,
+        },
+        connectionRequests: {
+          ...connectionStats,
+          trends: connectionTrends,
+        },
+        officers: {
+          totalActive: officers.length,
+          // Only return the fields needed for the dashboard officer list
+          list: officers.slice(0, 20).map((o: any) => ({
+            id: o.id,
+            name: [o.firstName, o.middleName, o.lastName].filter(Boolean).join(' '),
+            role: o.role,
+          })),
+        },
+      };
+
+      const t3 = Date.now();
+      logger.info(`${requestId} response-ready elapsed=${t3 - t0}ms`);
+
+      return result;
+    } catch (err) {
+      const elapsed = Date.now() - t0;
+      logger.error(`${requestId} FAILED elapsed=${elapsed}ms`, {
+        error: (err as Error).message,
+        stack: (err as Error).stack?.split('\n').slice(0, 3).join(' | '),
+      });
+      throw err; // Re-throw so the controller returns 500 with structured error
+    }
   }
 
-  public async listUsers(query: { page?: number; limit?: number; search?: string; role?: string; status?: string }): Promise<any> {
+  public async listUsers(query: {
+    page?: number;
+    limit?: number;
+    search?: string;
+    role?: string;
+    status?: string;
+  }): Promise<any> {
     const result = await userRepository.listUsers(query);
 
     const decryptedUsers = result.users.map((u) => ({
@@ -181,7 +248,10 @@ export class AdminService {
    * User detail with documents and applications. The audit log write is
    * fire-and-forget so it doesn't block the response on a compliance write.
    */
-  public async getUserDetail(userId: string, adminActor: { sub: string; ip: string }): Promise<any> {
+  public async getUserDetail(
+    userId: string,
+    adminActor: { sub: string; ip: string },
+  ): Promise<any> {
     const [user] = await Promise.all([
       this.prisma.user.findUnique({
         where: { id: userId },
@@ -197,18 +267,22 @@ export class AdminService {
         },
       }),
       // Fire-and-forget audit log — don't block the response
-      this.prisma.auditLog.create({
-        data: {
-          userId,
-          performedBy: adminActor.sub,
-          action: AuditAction.ADMIN_USER_VIEWED,
-          module: 'ADMIN_USER_MANAGEMENT',
-          ipAddress: adminActor.ip || '127.0.0.1',
-          metadata: { targetUserId: userId, viewTimestamp: new Date() },
-        },
-      }).catch((err) => {
-        logger.warn('Failed to create audit log for user view', { error: err.message });
-      }),
+      this.prisma.auditLog
+        .create({
+          data: {
+            userId,
+            performedBy: adminActor.sub,
+            action: AuditAction.ADMIN_USER_VIEWED,
+            module: 'ADMIN_USER_MANAGEMENT',
+            ipAddress: adminActor.ip || '127.0.0.1',
+            metadata: { targetUserId: userId, viewTimestamp: new Date() },
+          },
+        })
+        .catch((err) => {
+          logger.warn('Failed to create audit log for user view', {
+            error: (err as Error).message,
+          });
+        }),
     ]);
 
     if (!user) {
@@ -233,7 +307,9 @@ export class AdminService {
       lastLoginAt: user.lastLoginAt,
     };
 
-    const decryptedDocuments = user.documents.map((doc) => toDocumentView(doc, { includeSensitive: true }));
+    const decryptedDocuments = user.documents.map((doc) =>
+      toDocumentView(doc, { includeSensitive: true }),
+    );
 
     return {
       user: decryptedUser,
@@ -242,7 +318,10 @@ export class AdminService {
     };
   }
 
-  public async updateUser(userId: string, data: { firstName?: string; lastName?: string; mobile?: string }): Promise<any> {
+  public async updateUser(
+    userId: string,
+    data: { firstName?: string; lastName?: string; mobile?: string },
+  ): Promise<any> {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) {
       throw new NotFoundError('User');
@@ -286,22 +365,29 @@ export class AdminService {
     };
   }
 
-  public async exportUserData(userId: string, adminActor: { sub: string; ip: string }): Promise<any> {
+  public async exportUserData(
+    userId: string,
+    adminActor: { sub: string; ip: string },
+  ): Promise<any> {
     const detail = await this.getUserDetail(userId, adminActor);
 
     // Fire-and-forget audit log for export
-    this.prisma.auditLog.create({
-      data: {
-        userId,
-        performedBy: adminActor.sub,
-        action: AuditAction.ADMIN_USER_EXPORTED,
-        module: 'ADMIN_USER_MANAGEMENT',
-        ipAddress: adminActor.ip || '127.0.0.1',
-        metadata: { targetUserId: userId, exportTimestamp: new Date() },
-      },
-    }).catch((err) => {
-      logger.warn('Failed to create audit log for user export', { error: err.message });
-    });
+    this.prisma.auditLog
+      .create({
+        data: {
+          userId,
+          performedBy: adminActor.sub,
+          action: AuditAction.ADMIN_USER_EXPORTED,
+          module: 'ADMIN_USER_MANAGEMENT',
+          ipAddress: adminActor.ip || '127.0.0.1',
+          metadata: { targetUserId: userId, exportTimestamp: new Date() },
+        },
+      })
+      .catch((err) => {
+        logger.warn('Failed to create audit log for user export', {
+          error: (err as Error).message,
+        });
+      });
 
     return detail;
   }

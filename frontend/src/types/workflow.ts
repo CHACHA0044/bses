@@ -35,13 +35,7 @@ export type AssignmentStatus = 'ACTIVE' | 'REPLACED' | 'CLOSED';
 export type DocumentStatus = 'PENDING' | 'VERIFIED' | 'REJECTED';
 
 export type OcrStatus =
-  | 'PENDING'
-  | 'PROCESSING'
-  | 'EXTRACTED'
-  | 'PARTIAL'
-  | 'NEEDS_REVIEW'
-  | 'UNREADABLE'
-  | 'FAILED';
+  'PENDING' | 'PROCESSING' | 'EXTRACTED' | 'PARTIAL' | 'NEEDS_REVIEW' | 'UNREADABLE' | 'FAILED';
 
 export interface DocumentOcrData {
   aadhaar?: string | null;
@@ -218,5 +212,8 @@ export interface AdminAnalytics {
     rejectedCount?: number;
     trends?: { category: string; count: number }[];
   };
-  officers?: { totalActive?: number };
+  officers?: {
+    totalActive?: number;
+    list?: { id: string; name: string; role: string }[];
+  };
 }

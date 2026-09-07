@@ -1,13 +1,24 @@
 import type { Request, Response, NextFunction } from 'express';
-import { sendSuccess } from '@bses/shared';
+import { sendSuccess, createLogger } from '@bses/shared';
 import { adminService } from '../services/admin.service';
 
+const logger = createLogger({ service: 'admin-controller' });
+
 export class AdminController {
-  public getDashboard = async (_req: Request, res: Response, next: NextFunction): Promise<void> => {
+  public getDashboard = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    const requestId = `[ADMIN_DASHBOARD_CTRL:${Date.now()}]`;
     try {
+      logger.info(
+        `${requestId} auth-ok user=${req.user?.sub ?? 'unknown'} role=${req.user?.role ?? 'unknown'}`,
+      );
       const analytics = await adminService.getDashboardAnalytics();
       sendSuccess(res, { analytics });
     } catch (err) {
+      logger.error(`${requestId} controller-error`, {
+        error: (err as Error).message,
+        name: (err as Error).name,
+        code: (err as any).code,
+      });
       next(err);
     }
   };
@@ -27,7 +38,11 @@ export class AdminController {
     }
   };
 
-  public listConnectionRequests = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  public listConnectionRequests = async (
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ): Promise<void> => {
     try {
       const page = req.query['page'] ? parseInt(req.query['page'] as string, 10) : 1;
       const limit = req.query['limit'] ? parseInt(req.query['limit'] as string, 10) : 10;
@@ -35,7 +50,13 @@ export class AdminController {
       const status = req.query['status'] as any;
       const connectionType = req.query['connectionType'] as any;
 
-      const data = await adminService.listConnectionRequests({ page, limit, search, status, connectionType });
+      const data = await adminService.listConnectionRequests({
+        page,
+        limit,
+        search,
+        status,
+        connectionType,
+      });
       sendSuccess(res, data);
     } catch (err) {
       next(err);
@@ -63,7 +84,11 @@ export class AdminController {
     }
   };
 
-  public changeUserStatus = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  public changeUserStatus = async (
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ): Promise<void> => {
     try {
       const { id } = req.params;
       const { status } = req.body;
@@ -74,7 +99,11 @@ export class AdminController {
     }
   };
 
-  public exportUserData = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  public exportUserData = async (
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ): Promise<void> => {
     try {
       const { id } = req.params;
       const adminActor = { sub: req.user!.sub, ip: req.ip || '127.0.0.1' };
@@ -87,4 +116,3 @@ export class AdminController {
 }
 
 export const adminController = new AdminController();
-

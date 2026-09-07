@@ -18,34 +18,113 @@ import {
   Loader2,
 } from 'lucide-react';
 
-const consumerNavItems = [
-  { label: 'Dashboard', href: '/dashboard', icon: LayoutDashboard, exact: true },
-  { label: 'Apply Connection', href: '/connections/apply', icon: FilePlus, exact: true },
-  { label: 'Track Applications', href: '/connections', icon: FolderOpen, exact: false },
-  { label: 'My Profile', href: '/profile', icon: UserCheck, exact: false },
-  { label: 'Settings', href: '/settings', icon: Settings, exact: false },
-  { label: 'Help & FAQs', href: '/help-center', icon: HelpCircle, exact: false },
+interface NavItem {
+  label: string;
+  href: string;
+  icon: React.ComponentType<{ className?: string }>;
+  /**
+   * The list of route patterns this item is "active" on. A pattern matches if
+   * the current pathname equals the pattern exactly OR the pathname starts with
+   * the pattern followed by a `/`. This is the source of truth for active state
+   * — no manual `exact` boolean to maintain, no state, no side effects.
+   */
+  activeOn: string[];
+  /**
+   * Excluded route prefixes. If the current pathname starts with one of these,
+   * this nav item is NOT considered active even if it would otherwise match.
+   * Used so e.g. "Apply Connection" can match only its own flow, while
+   * "Track Applications" matches every other `/connections/*` child route.
+   */
+  excludeOn?: string[];
+}
+
+const consumerNavItems: NavItem[] = [
+  {
+    label: 'Dashboard',
+    href: '/dashboard',
+    icon: LayoutDashboard,
+    activeOn: ['/dashboard'],
+  },
+  {
+    label: 'Apply Connection',
+    href: '/connections/apply',
+    icon: FilePlus,
+    activeOn: ['/connections/apply'],
+  },
+  {
+    label: 'Track Applications',
+    href: '/connections',
+    icon: FolderOpen,
+    activeOn: ['/connections'],
+    excludeOn: ['/connections/apply'],
+  },
+  {
+    label: 'My Profile',
+    href: '/profile',
+    icon: UserCheck,
+    activeOn: ['/profile'],
+  },
+  {
+    label: 'Settings',
+    href: '/settings',
+    icon: Settings,
+    activeOn: ['/settings'],
+  },
+  {
+    label: 'Help & FAQs',
+    href: '/help-center',
+    icon: HelpCircle,
+    activeOn: ['/help-center'],
+  },
 ];
 
-const adminNavItems = [
-  { label: 'Admin Overview', href: '/admin/dashboard', icon: LayoutDashboard, exact: true },
-  { label: 'User Directory', href: '/admin/users', icon: UserCheck, exact: false },
-  { label: 'Connection Requests', href: '/admin/connections', icon: FolderOpen, exact: false },
+const adminNavItems: NavItem[] = [
+  {
+    label: 'Admin Overview',
+    href: '/admin/dashboard',
+    icon: LayoutDashboard,
+    activeOn: ['/admin/dashboard'],
+  },
+  {
+    label: 'User Directory',
+    href: '/admin/users',
+    icon: UserCheck,
+    activeOn: ['/admin/users'],
+  },
+  {
+    label: 'Connection Requests',
+    href: '/admin/connections',
+    icon: FolderOpen,
+    activeOn: ['/admin/connections', '/admin/connection-requests'],
+  },
 ];
 
-function isNavActive(href: string, exact: boolean, pathname: string) {
-  if (exact) return pathname === href;
-  if (href === '/connections') {
-    return (
-      pathname === '/connections' ||
-      (pathname.startsWith('/connections/') && !pathname.startsWith('/connections/apply'))
-    );
+/**
+ * Determine whether a sidebar item is active for the given pathname.
+ *
+ * Rules (no manual `exact` boolean required):
+ *   1. The pathname must equal one of the item's `activeOn` patterns, OR
+ *      start with one of those patterns followed by `/` (so a child route
+ *      highlights its parent section — e.g. `/admin/connections/abc` lights up
+ *      "Connection Requests").
+ *   2. The pathname must NOT start with any `excludeOn` prefix.
+ *
+ * The function is pure: it depends only on its inputs, so it is correct under
+ * direct URL navigation, page refresh, and nested routes alike.
+ */
+function isNavActive(item: NavItem, pathname: string): boolean {
+  const matches = item.activeOn.some(
+    (pattern) => pathname === pattern || pathname.startsWith(pattern + '/'),
+  );
+  if (!matches) return false;
+  if (item.excludeOn && item.excludeOn.some((ex) => pathname.startsWith(ex))) {
+    return false;
   }
-  return pathname === href || pathname.startsWith(href + '/');
+  return true;
 }
 
 export const Sidebar: React.FC = () => {
-  const pathname = usePathname();
+  const pathname = usePathname() || '/';
   const router = useRouter();
   const { user, isAuthenticated, isLoading, logout, isLoadingLogout } = useAuth();
   const isAdmin = user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN';
@@ -57,7 +136,8 @@ export const Sidebar: React.FC = () => {
      visually noisy and the Login row is a single, non-contextual action. */
   const showLoginItem = !isAuthenticated && !isLoading;
 
-  const activeHref = items.find((item) => isNavActive(item.href, item.exact, pathname))?.href;
+  const activeItem = items.find((item) => isNavActive(item, pathname));
+  const activeHref = activeItem?.href;
 
   const navRef = useRef<HTMLElement>(null);
   const itemRefs = useRef(new Map<string, HTMLAnchorElement | null>());
@@ -77,7 +157,7 @@ export const Sidebar: React.FC = () => {
     const navRect = nav.getBoundingClientRect();
     const elRect = activeEl.getBoundingClientRect();
     setPillStyle({ top: elRect.top - navRect.top, height: elRect.height });
-  }, [activeHref, showLoginItem]);
+  }, [activeHref, showLoginItem, pathname]);
 
   return (
     <aside className="w-56 lg:w-64 h-full p-3 flex flex-col justify-between select-none">
@@ -107,7 +187,7 @@ export const Sidebar: React.FC = () => {
           {isAuthenticated &&
             items.map((item) => {
               const Icon = item.icon;
-              const active = isNavActive(item.href, item.exact, pathname);
+              const active = isNavActive(item, pathname);
 
               return (
                 <Link
@@ -210,7 +290,9 @@ export const Sidebar: React.FC = () => {
             ) : (
               <LogOut className="h-4 w-4 shrink-0 text-red-500" aria-hidden="true" />
             )}
-            <span className="text-sm font-medium">{isLoadingLogout ? 'Signing out…' : 'Sign Out'}</span>
+            <span className="text-sm font-medium">
+              {isLoadingLogout ? 'Signing out…' : 'Sign Out'}
+            </span>
           </span>
         </button>
       )}

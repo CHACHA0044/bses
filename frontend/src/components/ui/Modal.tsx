@@ -10,6 +10,8 @@ export interface ModalProps {
   description?: string;
   children: React.ReactNode;
   maxWidth?: 'sm' | 'md' | 'lg' | 'xl';
+  /** Whether clicking the backdrop dismisses the modal (default: false) */
+  closeOnBackdropClick?: boolean;
 }
 
 export const Modal: React.FC<ModalProps> = ({
@@ -19,6 +21,7 @@ export const Modal: React.FC<ModalProps> = ({
   description,
   children,
   maxWidth = 'md',
+  closeOnBackdropClick = false,
 }) => {
   const [mounted, setMounted] = useState(false);
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -80,43 +83,54 @@ export const Modal: React.FC<ModalProps> = ({
     xl: 'max-w-xl',
   };
 
-  return createPortal(
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      {/* Backdrop */}
-      <div
-        className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm transition-opacity animate-in fade-in duration-200"
-        onClick={onClose}
-        aria-hidden="true"
-      />
+  const handleBackdropClick = (e: React.MouseEvent) => {
+    if (closeOnBackdropClick && e.target === e.currentTarget) {
+      onClose();
+    }
+  };
 
-      {/* Modal Dialog Box */}
+  return createPortal(
+    // Outer div: fixed, covers entire viewport (inset-0), highest z-index.
+    // This is the backdrop that sits ABOVE everything else in the app.
+    <div
+      className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
+      onClick={handleBackdropClick}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="modal-title"
+    >
+      {/* Backdrop — sits below the modal dialog but above all app content.
+          Uses bg-black/50 (not bg-slate-900/60) for true darkness that
+          properly covers any bright content, plus backdrop-blur-sm for
+          consistent cross-browser dimming without looking washed out. */}
+      <div className="fixed inset-0 bg-black/50 backdrop-blur-sm" aria-hidden="true" />
+
+      {/* Modal Dialog Box — sits above the backdrop, z-10 relative to its
+          parent container (which already has z-[9999]). The dialog itself
+          gets a high z-index so it is always on top of the backdrop.
+          overflow-y-auto on the dialog content allows internal scrolling. */}
       <div
         ref={dialogRef}
         tabIndex={-1}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="modal-title"
-        className={`relative z-10 w-full ${widthMap[maxWidth]} rounded-2xl bg-white p-6 text-slate-900 shadow-2xl border border-slate-200 animate-in zoom-in-95 duration-200 space-y-4 outline-none`}
+        className={`relative z-10 w-full ${widthMap[maxWidth]} max-h-[90vh] rounded-2xl bg-white text-slate-900 shadow-2xl border border-slate-200 outline-none flex flex-col`}
       >
-        <div className="flex items-start justify-between">
-          <div>
-            <h3 id="modal-title" className="text-lg font-bold text-slate-900 tracking-tight">
+        {/* Fixed header */}
+        <div className="flex items-start justify-between gap-4 px-6 py-5 border-b border-slate-100 shrink-0">
+          <div className="min-w-0">
+            <h3 id="modal-title" className="text-base font-bold text-slate-900 tracking-tight">
               {title}
             </h3>
             {description && <p className="text-xs text-slate-500 mt-0.5">{description}</p>}
           </div>
-          <button
-            onClick={onClose}
-            className={iconButton}
-            aria-label="Close dialog"
-          >
+          <button onClick={onClose} className={iconButton} aria-label="Close dialog">
             <X className="h-5 w-5" />
           </button>
         </div>
 
-        <div>{children}</div>
+        {/* Scrollable content area */}
+        <div className="flex-1 overflow-y-auto px-6 py-5">{children}</div>
       </div>
     </div>,
-    document.body
+    document.body,
   );
 };
