@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { createLogger } from '@bses/shared';
+import { createLogger, getMemorySnapshot } from '@bses/shared';
 import { ChildManager, type ServiceStatus } from './child';
 import { buildGatewayEnv, buildServiceEnv, getServices, type ServiceSpec } from './services';
 
@@ -102,8 +102,37 @@ class Supervisor {
     const heartbeat = setInterval(() => {
       if (this.shuttingDown) return;
       this.pushStatusToGateway();
+      this.logCombinedMemory();
     }, 15_000);
     heartbeat.unref();
+  }
+
+  /**
+   * Logs the combined RSS of the supervisor plus every child process. Render
+   * OOM-kills the container when the SUM crosses the hard cap, so the first
+   * sign of a leak shows up in these lines rather than as a silent restart.
+   * Child RSS is read from the OS (each child's `process.memoryUsage` would
+   * otherwise need per-child IPC).
+   */
+  private logCombinedMemory(): void {
+    const ext = process.memoryUsage();
+    const childRssMb = this.children.reduce((total, c) => {
+      const rss = c.getRssBytes();
+      return rss > 0 ? total + rss : total;
+    }, 0);
+    const superRssMb = Math.round((ext.rss / 1024 / 1024) * 10) / 10;
+    const childRssTotalMb = Math.round((childRssMb / 1024 / 1024) * 10) / 10;
+    const perChild = this.children
+      .map((c) => `${c.status.name}~${Math.max(0, Math.round((c.getRssBytes() / 1024 / 1024) * 10) / 10)}MB`)
+      .join(', ');
+    const self = getMemorySnapshot();
+    logger.info('[MEMORY] Combined container footprint', {
+      supervisorRssMb: superRssMb,
+      childrenRssMb: childRssTotalMb,
+      totalRssMb: Math.round((superRssMb + childRssTotalMb) * 10) / 10,
+      supervisorHeapMb: self.heapUsedMb,
+      perChild,
+    });
   }
 
   /**
@@ -144,7 +173,9 @@ class Supervisor {
     const publicPort = publicPortRaw ? Number(publicPortRaw) : undefined;
     // Only non-gateway (loopback) ports participate in collision checks.
     // The gateway's own port IS the public port — it can never collide with itself.
-    const internalPorts = services.filter((s) => !s.isGateway).map((s) => s.port);
+    const internalPorts = services
+      .filter((s) => !s.isGateway)
+      .flatMap((s) => (s.ports && s.ports.length > 0 ? s.ports : [s.port]));
     if (publicPort && Number.isFinite(publicPort)) {
       const conflict = internalPorts.find((p) => p === publicPort);
       if (conflict) {

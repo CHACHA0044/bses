@@ -1,8 +1,9 @@
 import 'dotenv/config';
 import { createApp } from './app';
 import { config } from './config';
-import { createLogger } from '@bses/shared';
+import { createLogger, startMemoryMonitor } from '@bses/shared';
 import { connectMongoDB, disconnectMongoDB } from './db/mongo.client';
+import { connectDatabase, disconnectDatabase } from './db/db.client';
 import { ocrService, shutdownOcrEngine } from './services/ocr.service';
 
 const logger = createLogger({ service: 'document-service' });
@@ -43,11 +44,24 @@ const start = async (): Promise<void> => {
     logger.warn('Document Service starting with uninitialized MongoDB GridFS connection.');
   }
 
+  try {
+    await connectDatabase().catch((err) => {
+      logger.warn(`PostgreSQL initial connection skipped in dev mode: ${err.message}`);
+    });
+  } catch (err: unknown) {
+    logger.warn('Document Service starting with uninitialized database connection.');
+  }
+
   const app = createApp();
 
   const server = app.listen(config.PORT, '127.0.0.1', () => {
     logger.info('Document service running', { port: config.PORT, env: config.NODE_ENV });
   });
+
+  // The OCR + sharp + Tesseract memory profile is the largest in the system;
+  // sample it here so sustained growth is visible in Render logs before it
+  // reaches the container cap and triggers an OOM restart.
+  const memoryMonitor = startMemoryMonitor(logger, 'document', 120_000);
 
   // Recover any OCR rows left PENDING, or PROCESSING by a previous process
   // (a crash/restart mid-job). Rows that already completed OCR pre-migration
@@ -58,19 +72,26 @@ const start = async (): Promise<void> => {
       logThrottledError('OCR recovery sweep failed', { error: err });
     });
   }, RECOVERY_INTERVAL_MS);
-  void ocrService
-    .recoverInterruptedJobs()
-    .then((recovered) => {
-      if (recovered > 0) logger.info(`OCR recovery re-queued ${recovered} interrupted document(s)`);
-    })
-    .catch((err) => logger.error('OCR initial recovery failed', { error: err }));
+  // Initial recovery is deferred out of the critical startup path — the app is
+  // ready to serve uploads/downloads immediately; interrupted OCR jobs are
+  // re-queued asynchronously without blocking readiness.
+  setTimeout(() => {
+    void ocrService
+      .recoverInterruptedJobs()
+      .then((recovered) => {
+        if (recovered > 0) logger.info(`OCR recovery re-queued ${recovered} interrupted document(s)`);
+      })
+      .catch((err) => logger.error('OCR initial recovery failed', { error: err }));
+  }, 2000);
 
   const shutdown = async (signal: string): Promise<void> => {
     logger.info(`${signal} received — shutting down Document service gracefully`);
     clearInterval(recoveryTimer);
+    memoryMonitor.stop();
     server.close(async () => {
       await shutdownOcrEngine();
       await disconnectMongoDB();
+      await disconnectDatabase();
       logger.info('Document service server closed.');
       process.exit(0);
     });

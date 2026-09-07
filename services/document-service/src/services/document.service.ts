@@ -78,6 +78,11 @@ export class DocumentService {
 
     const gridfsFileId = uploadStream.id.toString();
 
+    // Drop the source buffer reference now that it has been encrypted + written
+    // to GridFS. The file buffer can be up to MAX_FILE_SIZE_MB and must not
+    // linger through the remaining async DB work against a 512 MB budget.
+    (dto as { fileBuffer?: Buffer }).fileBuffer = Buffer.alloc(0);
+
     // 2. Insert metadata record into PostgreSQL documents table
     const document = await this.prisma.document.create({
       data: {

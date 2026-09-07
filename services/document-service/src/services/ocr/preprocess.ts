@@ -45,15 +45,16 @@ const percentile = (values: Uint8Array, p: number): number => {
   return sorted[idx] ?? 0;
 };
 
+/** Contrast-stretches `pixels` in place (peak-memory friendly: no second
+ *  full-size array is allocated) and returns the same array. */
 const contrastStretch = (pixels: Uint8Array): Uint8Array => {
   const lo = percentile(pixels, 1);
   const hi = percentile(pixels, 99);
   const range = hi - lo || 1;
-  const out = new Uint8Array(pixels.length);
   for (let i = 0; i < pixels.length; i++) {
-    out[i] = Math.max(0, Math.min(255, Math.round((((pixels[i] ?? 0) - lo) / range) * 255)));
+    pixels[i] = Math.max(0, Math.min(255, Math.round((((pixels[i] ?? 0) - lo) / range) * 255)));
   }
-  return out;
+  return pixels;
 };
 
 const otsuThreshold = (hist: number[], total: number): number => {
@@ -80,13 +81,14 @@ const otsuThreshold = (hist: number[], total: number): number => {
   return threshold;
 };
 
+/** Otsu-binaries `pixels` in place (no second full-size array) and returns the
+ *  same array. */
 const otsuBinarize = (pixels: Uint8Array): Uint8Array => {
   const hist = new Array<number>(256).fill(0);
   for (const v of pixels) hist[v] = (hist[v] ?? 0) + 1;
   const threshold = otsuThreshold(hist, pixels.length);
-  const out = new Uint8Array(pixels.length);
-  for (let i = 0; i < pixels.length; i++) out[i] = (pixels[i] ?? 0) < threshold ? 0 : 255;
-  return out;
+  for (let i = 0; i < pixels.length; i++) pixels[i] = (pixels[i] ?? 0) < threshold ? 0 : 255;
+  return pixels;
 };
 
 /**

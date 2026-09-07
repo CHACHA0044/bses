@@ -27,6 +27,10 @@ services:
     autoDeploy: true
     plan: free
     envVars:
+      # Pin the backend to Node.js 20 LTS. Node 26 (default on Render) is not
+      # LTS and has different V8 memory behavior that contributed to OOM crashes.
+      - key: NODE_VERSION
+        value: '20.18.0'
       - key: NODE_ENV
         value: production
       - key: DATABASE_URL
@@ -63,11 +67,6 @@ services:
         value: '3012'
       - key: INTERNAL_PORT_NOTIFICATION
         value: '3013'
-      # Gateway keep-alive: self-ping every 3 min; log every 3rd ping
-      - key: SELF_PING_INTERVAL_MS
-        value: '180000'
-      - key: SELF_PING_LOG_EVERY
-        value: '3'
       # OCR pipeline (free tier ≈ 512 MB → single worker, bilingual Hindi+English)
       - key: OCR_WORKERS
         value: '1'
@@ -81,3 +80,7 @@ services:
         value: '25'
       - key: OCR_PDF_RENDER_DIMENSION
         value: '1500'
+      - key: OCR_RECOVERY_BATCH
+        value: '2'
+      - key: OCR_ENGINE_IDLE_TIMEOUT_MS
+        value: '60000'

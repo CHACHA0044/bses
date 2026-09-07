@@ -10,29 +10,11 @@ const logger = createLogger({ service: 'prisma-client' });
 /**
  * Resolve a hostname to an IPv4 literal.
  *
- * Three independent strategies, tried in order:
- *
- * 1. `dns.resolve4` — Node's internal DNS (uses the `dns` module's
- *    configured server, NOT the OS resolver). Render's free tier has a
- *    broken/IPv6-only OS resolver that can't return A records for
- *    `db.<ref>.supabase.co`, but Node's internal DNS often can. This is
- *    the first thing we try.
- *
- * 2. `DATABASE_HOST` env var — a hard-coded IPv4 literal you set in the
- *    Render UI. Use this if even Node's internal DNS can't resolve the
- *    hostname from Render's network. Get the A record once from your own
- *    machine (`nslookup db.<ref>.supabase.co`) and paste it here.
- *
- * 3. Public DNS resolvers (Google 8.8.8.8, Cloudflare 1.1.1.1) via
- *    `dns.lookup` with `family: 4`. Some authoritative DNS servers (like
- *    Supabase's) only publish AAAA records for certain hostnames, but
- *    public resolvers may have cached A records from a different path.
- *
- * Returns null if none of the strategies work — caller falls back to the
- * raw connection string (which will then use the OS resolver and may hit
- * IPv6).
+ * Uses async DNS resolution to avoid the race condition where `dns.resolve4`
+ * callback-based API was checked synchronously (always returning false on
+ * first call, falling through to the slower public DNS resolver strategy).
  */
-const resolveIPv4 = (hostname: string): string | null => {
+const resolveIPv4 = async (hostname: string): Promise<string | null> => {
   // Strategy 2 — hard-coded override wins.
   const override = process.env['DATABASE_HOST'];
   if (override && override !== hostname) {
@@ -40,52 +22,33 @@ const resolveIPv4 = (hostname: string): string | null => {
     return override;
   }
 
-  // Strategy 1 — Node's internal DNS, callback form (synchronous on most
-  // resolvers but we still wrap defensively in case the callback fires async).
+  // Strategy 1 — Node's internal DNS (async).
   try {
-    let resolved: string | null = null;
-    let finished = false;
-    dns.resolve4(hostname, (err, addresses) => {
-      finished = true;
-      if (!err && addresses && addresses.length > 0) {
-        resolved = addresses[0]!;
-      }
-    });
-    if (finished && resolved) {
-      return resolved;
+    const addresses = await dns.promises.resolve4(hostname);
+    if (addresses && addresses.length > 0) {
+      return addresses[0]!;
     }
   } catch {
     // fall through
   }
 
   // Strategy 3 — try public DNS resolvers (Google 8.8.8.8, Cloudflare 1.1.1.1)
-  // via dns.lookup with explicit family. We temporarily swap the global
-  // server list, run the lookup, and restore. dns.lookup with a callback
-  // is synchronous on most resolvers (c-ares), so the result is populated
-  // before the call returns.
+  // via dns.promises.lookup with explicit family: 4.
   const publicResolvers = ['8.8.8.8', '1.1.1.1', '8.8.4.4'];
   const beforeServers = dns.getServers();
   for (const resolver of publicResolvers) {
     try {
-      let resolved: string | null = null;
-      let finished = false;
       dns.setServers([resolver]);
-      try {
-        dns.lookup(hostname, { family: 4, verbatim: true, hints: 0 }, (err, address) => {
-          finished = true;
-          if (!err && address) {
-            resolved = address;
-          }
-        });
-      } finally {
-        dns.setServers(beforeServers);
-      }
-      if (finished && resolved) {
-        logger.info(`Resolved ${hostname} -> ${resolved} via public DNS ${resolver}`);
-        return resolved;
+      const result = await dns.promises.lookup(hostname, { family: 4, verbatim: true, hints: 0 });
+      const address = typeof result === 'string' ? result : result.address;
+      if (address) {
+        logger.info(`Resolved ${hostname} -> ${address} via public DNS ${resolver}`);
+        return address;
       }
     } catch {
       // try next resolver
+    } finally {
+      dns.setServers(beforeServers);
     }
   }
 
@@ -105,7 +68,7 @@ const resolveIPv4 = (hostname: string): string | null => {
  *
  * Falls back to the raw connection string if IPv4 resolution fails.
  */
-const buildPoolConfig = (): PoolConfig => {
+const buildPoolConfig = async (): Promise<PoolConfig> => {
   const raw = process.env['DATABASE_URL'];
   if (!raw) {
     throw new Error('DATABASE_URL is not set');
@@ -130,7 +93,7 @@ const buildPoolConfig = (): PoolConfig => {
     return { connectionString: withPgSslMode(raw), ssl };
   }
 
-  const ipv4 = resolveIPv4(hostname);
+  const ipv4 = await resolveIPv4(hostname);
   if (ipv4) {
     logger.info(`Resolved ${hostname} -> ${ipv4} (IPv4 forced for Postgres)`);
     return {
@@ -148,25 +111,53 @@ const buildPoolConfig = (): PoolConfig => {
 };
 
 let prismaInstance: PrismaClient | null = null;
+let prismaInitializing: Promise<PrismaClient> | null = null;
+
+/**
+ * Injects an externally-created PrismaClient (used by the merged-service
+ * process so auth + consumer + notification share ONE database client).
+ * Call with `null` to reset to standalone mode.
+ */
+export const setPrismaClient = (client: PrismaClient | null): void => {
+  prismaInstance = client;
+  prismaInitializing = null;
+};
 
 export const getPrismaClient = (): PrismaClient => {
-  if (!prismaInstance) {
-    const adapter = new PrismaPg(buildPoolConfig());
-    prismaInstance = new PrismaClient({
+  if (prismaInstance) return prismaInstance;
+  // If initialization is in progress, throw to let callers use connectDatabase() instead
+  if (prismaInitializing) {
+    throw new Error('PrismaClient is initializing — use connectDatabase() for first access');
+  }
+  throw new Error('PrismaClient not initialized — call connectDatabase() first');
+};
+
+export const connectDatabase = async (): Promise<PrismaClient> => {
+  if (prismaInstance) return prismaInstance;
+  if (prismaInitializing) return prismaInitializing;
+
+  prismaInitializing = (async () => {
+    const poolConfig = await buildPoolConfig();
+    const adapter = new PrismaPg(poolConfig);
+    const client = new PrismaClient({
       adapter,
       log:
         process.env['NODE_ENV'] === 'production'
           ? ['error', 'warn']
           : ['error', 'warn', 'info', 'query'],
     });
-  }
-  return prismaInstance;
-};
+    await client.$connect();
+    prismaInstance = client;
+    prismaInitializing = null;
+    return client;
+  })();
 
-export const connectDatabase = async (): Promise<PrismaClient> => {
-  const prisma = getPrismaClient();
-  await prisma.$connect();
-  return prisma;
+  try {
+    return await prismaInitializing;
+  } catch (err) {
+    prismaInitializing = null;
+    throw err;
+  }
 };
 
 export const disconnectDatabase = async (): Promise<void> => {
@@ -182,8 +173,10 @@ export const checkDatabaseHealth = async (): Promise<{
   details?: Record<string, unknown>;
 }> => {
   try {
-    const prisma = getPrismaClient();
-    await prisma.$queryRaw`SELECT 1`;
+    if (!prismaInstance) {
+      return { ready: false, details: { error: 'PrismaClient not initialized' } };
+    }
+    await prismaInstance.$queryRaw`SELECT 1`;
     return { ready: true };
   } catch (err) {
     logger.error('Database health check failed', { error: String(err) });

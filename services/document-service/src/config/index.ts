@@ -30,6 +30,18 @@ const documentEnvSchema = baseEnvSchema.extend({
   OCR_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(10).default(3),
   /** Exponential backoff base for infra retries. */
   OCR_RETRY_BACKOFF_MS: z.coerce.number().int().positive().default(30_000),
+  /**
+   * Max documents re-queued per recovery sweep. Prevents a large backlog of
+   * interrupted jobs from flooding the in-memory queue at boot/restart, which
+   * would spike memory on the free tier. Remaining rows are picked up by later
+   * sweeps.
+   */
+  OCR_RECOVERY_BATCH: z.coerce.number().int().min(1).max(50).default(2),
+  /**
+   * How long (ms) the Tesseract engine stays warm while idle before workers are
+   * terminated and their WASM heap released. Re-created lazily on the next job.
+   */
+  OCR_ENGINE_IDLE_TIMEOUT_MS: z.coerce.number().int().positive().default(60_000),
   /** Tesseract languages ("eng", "hin", "eng+hin"). Loaded from `assets/`. */
   OCR_LANGUAGES: z.string().min(3).default('eng+hin'),
   /** Hard cap on PDF pages read / rendered per document. */

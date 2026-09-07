@@ -20,20 +20,16 @@ import { config } from './config';
 import { registerRoutes } from './routes';
 import { getSupervisorStatus } from './supervisorStatus';
 
-const logger = createLogger({ service: 'gateway-ping' });
-
-/** In-process hit counter for the /ping keep-alive endpoint (replaces Redis INCR). */
-let pingHits = 0;
+const logger = createLogger({ service: 'gateway' });
 
 /**
- * Log self-ping activity at most once per SELF_PING_LOG_EVERY_MINUTES based on
- * process uptime — NOT the in-memory hit counter. The counter is a boot-local
- * signal, so throttling by it makes logs reset to "#3" after every deploy and
- * depend on how many processes/instances exist. Uptime-based throttling is
- * restart-proof: at most 1 INFO line per window regardless of process churn.
+ * How often (ms) the readiness probe checks upstream services.
+ * Kept at 60s — frequent enough for Render health checks, sparse enough
+ * to avoid constant axios allocations.
  */
-const PING_LOG_EVERY_MINUTES_DEFAULT = 60;
-let lastPingLogUptimeMin = -1;
+const READY_PROBE_INTERVAL_MS = 60_000;
+let lastReadyProbeAt = 0;
+let cachedReadyStatus: { ready: boolean; details: Record<string, string> } | null = null;
 
 export const createApp = (): express.Application => {
   const app = express();
@@ -96,6 +92,27 @@ export const createApp = (): express.Application => {
     serviceName: 'gateway',
     version: '1.0.0',
     getReadinessStatus: async () => {
+      // Prefer IPC supervisor status (zero-allocation, already pushed) when fresh.
+      const supervisor = getSupervisorStatus();
+      if (supervisor) {
+        const allReady = supervisor.services.every(
+          (s) => s.state === 'running' && s.ready,
+        );
+        if (allReady) {
+          const details: Record<string, string> = {};
+          for (const s of supervisor.services) {
+            details[s.name] = 'UP';
+          }
+          return { ready: true, details };
+        }
+      }
+
+      // Fallback: live probe upstream services (only when IPC status is stale/absent)
+      const now = Date.now();
+      if (cachedReadyStatus && now - lastReadyProbeAt < READY_PROBE_INTERVAL_MS) {
+        return cachedReadyStatus;
+      }
+
       const services = [
         { name: 'auth-service', url: `${config.AUTH_SERVICE_URL}/ready` },
         { name: 'consumer-service', url: `${config.CONSUMER_SERVICE_URL}/ready` },
@@ -123,7 +140,9 @@ export const createApp = (): express.Application => {
         }
       });
 
-      return { ready: allReady, details };
+      cachedReadyStatus = { ready: allReady, details };
+      lastReadyProbeAt = now;
+      return cachedReadyStatus;
     },
   });
 
@@ -131,74 +150,12 @@ export const createApp = (): express.Application => {
   app.get('/ready', readinessHandler);
   app.get('/version', versionHandler);
 
-  // Self-ping keep-alive: an external cron (e.g. UptimeRobot or a GitHub Action)
-  // hits /ping every few minutes so Render (and similar PaaS) does NOT spin down
-  // the instance after the no-traffic idle window. Without this, cold starts on
-  // real user traffic add several seconds of latency.
-  //
-  // Design goals for this endpoint:
-  //   - Do enough varied CPU work that a passive observer can confirm the event
-  //     loop actually executed (not a cached/static response).
-  //   - Surface the gateway's own health (process snapshot) plus the supervisor
-  //     IPC-reported state of the child services, so a /ping call is also a
-  //     lightweight liveness check of the whole stack.
-  //   - Vary iteration count + operation + response message per call so the
-  //     response signature is not trivially cacheable / scrapable.
-  //   - Stay dependency-free (no Redis / Mongoose in the gateway) — the gateway
-  //     already has a cheap, fast path; we deliberately do not introduce new
-  //     infra here, just exercise the event loop harder.
+  // Lightweight keep-alive endpoint. No CPU work, no background requests,
+  // no in-memory counters — just a minimal response proving the process is alive.
+  // Render's idle spin-down is prevented by external traffic (users, Vercel frontend),
+  // not by localhost self-pings which have no effect on Render's idle detection.
   app.get('/ping', (_req, res) => {
     try {
-      const started = Date.now();
-
-      // Randomized CPU work: 500-2000 iterations, one of 5 operations chosen at
-      // random per request. Different operation + different count each time means
-      // a static scraper can't fingerprint the response.
-      const iterations = Math.floor(500 + Math.random() * 1500);
-      const operations: Array<(i: number, r: number) => number> = [
-        (i, r) => Math.sqrt(i * r),
-        (i, r) => Math.pow(i, r % 3),
-        (i, r) => Math.log(i + 1) * r,
-        (i, r) => Math.sin(i) * Math.cos(r * i),
-        (i, r) => (i * r) % 997, // prime modulo for extra entropy
-      ];
-      // Pick a random operation. We assert non-undefined for the type checker —
-      // `Math.floor(Math.random() * operations.length)` is always a valid index
-      // because the index range is [0, length - 1].
-      const opIndex = Math.floor(Math.random() * operations.length);
-      const operation = operations[opIndex] ?? operations[0]!;
-      const cpuSample = Array.from({ length: iterations }, (_, i) => operation(i, Math.random())).reduce(
-        (a, b) => a + b,
-        0,
-      );
-
-      // Process snapshot — useful to confirm the same instance answered (pid
-      // + uptime) and that memory is stable (no leak on the keep-alive path).
-      const snapshot = {
-        pid: process.pid,
-        uptime: process.uptime(),
-        rss: process.memoryUsage().rss,
-        timestamp: started,
-      };
-
-      // Lightweight in-process hit counter. This replaces the example's Redis
-      // INCR — the gateway doesn't depend on Redis, and a counter here is plenty
-      // for proving the endpoint is being polled (it's a monotonic signal that
-      // survives across requests inside this process).
-      pingHits += 1;
-
-      // Non-blocking background keep-alive to child microservices' /ready endpoints
-      // to keep PostgreSQL / Prisma DB connection pools active and warm.
-      Promise.allSettled([
-        axios.get(`${config.AUTH_SERVICE_URL}/ready`, { timeout: 2000 }),
-        axios.get(`${config.CONSUMER_SERVICE_URL}/ready`, { timeout: 2000 }),
-      ]).catch(() => {/* non-fatal */});
-
-      // Pull supervisor-reported child-service state via IPC. Under the BSES
-      // supervisor this reflects live readiness of auth / consumer / document /
-      // notification without opening any new ports. When the gateway runs
-      // standalone (no IPC), we degrade to a 'unknown' status — the ping is still
-      // useful as a warm-up signal.
       const supervisor = getSupervisorStatus();
       const childServices = supervisor
         ? supervisor.services.reduce<Record<string, string>>((acc, s) => {
@@ -207,42 +164,11 @@ export const createApp = (): express.Application => {
           }, {})
         : null;
 
-      // Vary the response message so a passive scraper can't trivially identify
-      // /ping as a static response (e.g. for "is this a real backend?" checks).
-      const messages = [
-        `Server is awake and did calculations...${iterations.toLocaleString()}`,
-        `Good evening, Colonel. Can I give you a lift? ${iterations.toLocaleString()}`,
-        `Pong. ${iterations.toLocaleString()} ops executed.`,
-        `Still here. ${iterations.toLocaleString()} iterations this round.`,
-        `Keep-alive heartbeat: ${iterations.toLocaleString()} ops, instance ${snapshot.pid}.`,
-      ];
-      const message = messages[Math.floor(Math.random() * messages.length)];
-
-      // Log self-ping activity sparsely (every SELF_PING_LOG_EVERY pings — default
-      // every 3rd ping ≈ every ~9 min at the 3-min interval) to keep logs readable.
-      const logEvery = Number(process.env.SELF_PING_LOG_EVERY) || 3;
-      if (pingHits % logEvery === 0) {
-        const elapsed = Date.now() - started;
-        logger.info(
-          `Self-ping #${pingHits}: ${iterations} ops in ${elapsed}ms (cpu ${cpuSample.toFixed(2)}, rss ${Math.round(snapshot.rss / 1024 / 1024)}MB)`,
-          {
-            iterations,
-            cpuSample: cpuSample.toFixed(2),
-            pingHits,
-            uptime: Math.round(snapshot.uptime),
-            rssMb: Math.round(snapshot.rss / 1024 / 1024),
-            elapsedMs: elapsed,
-          },
-        );
-      }
-
       sendSuccess(res, {
         pong: true,
-        message,
-        cpuSample: cpuSample.toFixed(2),
-        iterations,
-        pingHits,
-        snapshot,
+        pid: process.pid,
+        uptime: Math.round(process.uptime()),
+        rss: Math.round(process.memoryUsage().rss / 1024 / 1024),
         services: childServices,
         supervisor: supervisor
           ? {
@@ -251,13 +177,9 @@ export const createApp = (): express.Application => {
               state: supervisor.supervisor.state,
             }
           : null,
-        elapsedMs: Date.now() - started,
-        timestamp: new Date(started).toISOString(),
       });
     } catch (err) {
-      // /ping must never 5xx — a failing keep-alive defeats its own purpose. Log
-      // and return a minimal pong so the external monitor keeps hitting the URL.
-      // eslint-disable-next-line no-console
+      // /ping must never 5xx
       console.error('[/ping] unexpected error:', err);
       try {
         res.status(200).json({
@@ -270,11 +192,34 @@ export const createApp = (): express.Application => {
     }
   });
 
-  // Aggregated status: gateway + supervisor + every internal service. The
-  // supervisor pushes per-service state via IPC when running under the BSES
-  // supervisor; live loopback probes are always performed as ground truth, so
-  // the endpoint remains useful even when the gateway runs standalone.
+  // Aggregated status: gateway + supervisor + every internal service.
+  // IPC supervisor status is preferred (zero-allocation); live probes are
+  // only performed when IPC data is stale or absent.
   app.get('/health/services', async (_req, res) => {
+    const supervisor = getSupervisorStatus();
+
+    // If we have fresh IPC status (< 60s old), use it directly
+    if (supervisor && supervisor.supervisor.uptimeSeconds < 120) {
+      const services: Record<string, string> = {};
+      for (const s of supervisor.services) {
+        services[s.name] = s.state === 'running' && s.ready ? 'healthy' : s.state;
+      }
+      const allHealthy = Object.values(services).every((s) => s === 'healthy');
+      sendSuccess(res, {
+        status: allHealthy ? 'ok' : 'degraded',
+        service: 'gateway',
+        timestamp: new Date().toISOString(),
+        supervisor: {
+          pid: supervisor.supervisor.pid,
+          uptimeSeconds: supervisor.supervisor.uptimeSeconds,
+          state: supervisor.supervisor.state,
+        },
+        services,
+      });
+      return;
+    }
+
+    // Fallback: live probe all upstreams
     const upstreams = [
       { name: 'auth', url: `${config.AUTH_SERVICE_URL}/health` },
       { name: 'consumer', url: `${config.CONSUMER_SERVICE_URL}/health` },
@@ -295,8 +240,6 @@ export const createApp = (): express.Application => {
       if (r.status === 'fulfilled') live[name] = r.value.status;
       else live[name] = 'down';
     });
-
-    const supervisor = getSupervisorStatus();
 
     const services: Record<string, string> = {};
     for (const [name, liveStatus] of Object.entries(live)) {

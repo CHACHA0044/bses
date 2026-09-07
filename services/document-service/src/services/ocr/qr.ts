@@ -22,9 +22,11 @@ import sharp from 'sharp';
 
 const MAX_DECODED_PIXELS = 40_000_000;
 const MAX_DIMENSION = 2000;
-/** Candidates with a long edge under this get a 2x upscale retry. */
+/** Candidates whose long edge is under this get an upscale retry. */
 const UPSCALE_LONG_EDGE = 1200;
-const UPSCALE_FACTOR = 2;
+/** Upscale retry long-edge target — bounded so an RGBA view never exceeds
+ *  MAX_DIMENSION (≈16 MB worst case at 2000²×4b) on a 512 MB container. */
+const UPSCALE_TARGET = 2000;
 
 interface RgbaView {
   data: Uint8ClampedArray;
@@ -32,7 +34,11 @@ interface RgbaView {
   height: number;
 }
 
-const toRgba = async (buffer: Buffer, scale: number): Promise<RgbaView | null> => {
+const toRgba = async (
+  buffer: Buffer,
+  maxDimension: number,
+  allowEnlarge: boolean,
+): Promise<RgbaView | null> => {
   try {
     const { data, info } = await sharp(buffer, {
       failOn: 'none',
@@ -42,9 +48,9 @@ const toRgba = async (buffer: Buffer, scale: number): Promise<RgbaView | null> =
       .rotate()
       .flatten({ background: '#ffffff' })
       .resize(
-        Math.round(MAX_DIMENSION * scale) || 4,
-        Math.round(MAX_DIMENSION * scale) || 4,
-        { fit: 'inside', withoutEnlargement: scale <= 1 },
+        Math.round(maxDimension) || 4,
+        Math.round(maxDimension) || 4,
+        { fit: 'inside', withoutEnlargement: !allowEnlarge },
       )
       .ensureAlpha()
       .raw()
@@ -72,20 +78,25 @@ const attemptDecode = (view: RgbaView): string | null => {
 /**
  * Decodes a QR payload from one or more image buffers, returning the raw
  * payload string or `null`. Candidates are tried in order and the first hit
- * wins; each candidate also gets a small-image upscale retry. Never throws.
+ * wins; each candidate also gets a bounded small-image upscale retry when its
+ * long edge is under `UPSCALE_LONG_EDGE`. Never throws. The RGBA view from a
+ * decoded candidate is dropped before the next candidate is decoded, so at
+ * most one full-size RGBA buffer is alive at a time.
  */
 export const decodeQrFromImage = async (inputs: Buffer[]): Promise<string | null> => {
   for (const input of inputs) {
-    const base = await toRgba(input, 1);
+    let base = await toRgba(input, MAX_DIMENSION, false);
     if (!base) continue;
 
     let hit = attemptDecode(base);
+    base.data = new Uint8ClampedArray(0);
     if (hit) return hit;
 
     if (Math.max(base.width, base.height) < UPSCALE_LONG_EDGE) {
-      const upscaled = await toRgba(input, UPSCALE_FACTOR);
+      const upscaled = await toRgba(input, UPSCALE_TARGET, true);
       if (upscaled) {
         hit = attemptDecode(upscaled);
+        upscaled.data = new Uint8ClampedArray(0);
         if (hit) return hit;
       }
     }

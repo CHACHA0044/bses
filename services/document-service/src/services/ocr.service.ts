@@ -24,6 +24,8 @@ const MAX_ATTEMPTS = config.OCR_MAX_ATTEMPTS;
 const RETRY_BACKOFF_MS = config.OCR_RETRY_BACKOFF_MS;
 const LANGUAGES = config.OCR_LANGUAGES;
 const RENDER_DIMENSION = config.OCR_PDF_RENDER_DIMENSION;
+const RECOVERY_BATCH = config.OCR_RECOVERY_BATCH;
+const ENGINE_IDLE_TIMEOUT_MS = config.OCR_ENGINE_IDLE_TIMEOUT_MS;
 
 /**
  * In-memory, bounded work queue. `enqueue` returns quickly (after persistence)
@@ -38,14 +40,37 @@ const limiter = pLimit(WORKER_COUNT);
 // Workers are created only on first image/PDF-raster OCR run (never for a
 // syntactic PDF text pull) and torn down on graceful shutdown, so a service
 // that only ever handles born-digital PDFs holds zero engine memory.
+//
+// The engine is also released after ENGINE_IDLE_TIMEOUT_MS of inactivity: the
+// Tesseract WASM heap can be large, and on the 512 MB free tier an OCR worker
+// that sits warm between sparse uploads wastes memory for no benefit. Any use
+// (job start) refreshes the idle deadline before acquire.
 const langPath = path.join(process.cwd(), 'assets');
 let workers: Tesseract.Worker[] = [];
 let engineReady = false;
 let engineStarting: Promise<void> | null = null;
+let lastEngineUseAt = 0;
+let idleTimer: NodeJS.Timeout | null = null;
+
+const refreshEngineDeadline = (): void => {
+  lastEngineUseAt = Date.now();
+  if (idleTimer) clearTimeout(idleTimer);
+  idleTimer = setTimeout(() => {
+    void shutdownOcrEngine();
+  }, ENGINE_IDLE_TIMEOUT_MS);
+  idleTimer.unref();
+};
 
 const ensureEngine = async (): Promise<void> => {
-  if (engineReady) return;
-  if (engineStarting) return engineStarting;
+  if (engineReady) {
+    refreshEngineDeadline();
+    return;
+  }
+  if (engineStarting) {
+    await engineStarting;
+    refreshEngineDeadline();
+    return;
+  }
   engineStarting = (async () => {
     try {
       setLogging(false);
@@ -65,6 +90,7 @@ const ensureEngine = async (): Promise<void> => {
     } finally {
       engineStarting = null;
     }
+    refreshEngineDeadline();
   })();
   return engineStarting;
 };
@@ -72,16 +98,22 @@ const ensureEngine = async (): Promise<void> => {
 /** Reliably get a worker (selected round-robin) once the pool is up. */
 const acquireWorker = async (index: number): Promise<Tesseract.Worker> => {
   await ensureEngine();
+  refreshEngineDeadline();
   return workers[index % workers.length]!;
 };
 
 export const shutdownOcrEngine = async (): Promise<void> => {
+  if (idleTimer) {
+    clearTimeout(idleTimer);
+    idleTimer = null;
+  }
   limiter.clearQueue();
   const pending = workers.splice(0);
   workers = [];
   engineReady = false;
   if (pending.length) {
     await Promise.allSettled(pending.map((w) => w.terminate()));
+    logger.info(`OCR engine released (${pending.length} worker(s) terminated)`);
   }
 };
 
@@ -257,10 +289,15 @@ export class OcrService {
   }
 
   /**
-   * Re-queues every row that is PENDING, or PROCESSING/started and never
-   * reached a terminal state (crashed/restarted mid-job). Rows that already
-   * finished OCR (`ocr_confidence` set, e.g. legacy rows before the job-state
-   * migration) are left alone.
+   * Re-queues rows that are PENDING, or PROCESSING/started and never reached a
+   * terminal state (crashed/restarted mid-job). Rows that already finished OCR
+   * (`ocr_confidence` set, e.g. legacy rows before the job-state migration) are
+   * left alone.
+   *
+   * Batch-bounded: only `RECOVERY_BATCH` documents are re-queued per sweep so a
+   * large interrupted backlog cannot flood the in-memory queue (and therefore
+   * memory) on a 512 MB container. Remaining rows are picked up by subsequent
+   * sweeps (the 5-minute recovery interval re-scans everything).
    */
   public async recoverInterruptedJobs(): Promise<number> {
     let recovered = 0;
@@ -272,14 +309,31 @@ export class OcrService {
         ],
       },
       select: { id: true, ocrStatus: true, ocrConfidence: true },
+      orderBy: { ocrStartedAt: 'asc' },
+      take: RECOVERY_BATCH,
     });
+    const jobs: Promise<void>[] = [];
     for (const d of stale) {
       if (d.ocrConfidence != null && d.ocrStatus === OcrJobStatus.PENDING) continue;
       recovered++;
-      void this.processNow(d.id).catch(() => {
-        /* recovery is best-effort */
-      });
+      // A stale PROCESSING row can never be re-run while it still says
+      // PROCESSING (runJob bails on those) — reset it to PENDING so the retry
+      // actually happens instead of silently skipping every recovered row.
+      if (d.ocrStatus === OcrJobStatus.PROCESSING) {
+        await this.prisma.document.update({
+          where: { id: d.id },
+          data: { ocrStatus: OcrJobStatus.PENDING, ocrStartedAt: null },
+        });
+      }
+      jobs.push(
+        this.processNow(d.id).catch(() => {
+          /* recovery is best-effort */
+        }),
+      );
     }
+    // Wait for this batch before returning so the next sweep can't overlap it
+    // (prevents unbounded concurrent recovery queues).
+    if (jobs.length) await Promise.allSettled(jobs);
     return recovered;
   }
 
@@ -446,11 +500,16 @@ export class OcrService {
     const fileId = new ObjectId(gridfsFileId);
     const files = await bucket.find({ _id: fileId }).toArray();
     const encrypted = files[0]?.metadata?.encrypted === true;
-    const chunks: Buffer[] = [];
+    // Stream the file and decrypt on the fly (Transform) so we never hold the
+    // full ciphertext AND plaintext in memory at once — on a 512 MB budget that
+    // doubling matters for large uploads. Only the decrypted Buffer is retained.
     const stream = bucket.openDownloadStream(fileId);
-    for await (const c of stream) chunks.push(c as Buffer);
-    const data = Buffer.concat(chunks);
-    return encrypted ? encryptionService.decryptBuffer(data) : data;
+    const readable = encrypted ? stream.pipe(encryptionService.decryptStream()) : stream;
+    const chunks: Buffer[] = [];
+    for await (const c of readable) {
+      chunks.push(c as Buffer);
+    }
+    return Buffer.concat(chunks);
   }
 
   private async runImagePipeline(
@@ -458,6 +517,9 @@ export class OcrService {
     fileBuffer: Buffer,
     docType: DocumentType,
   ): Promise<ExtractedDataWithMeta> {
+    // Preprocess decodes the raw upload to pixels in place; the raw file bytes
+    // are only needed as a QR candidate, so we drop the reference right after
+    // the QR pass to keep peak memory low while Tesseract loads.
     const prep = await prepareImage(fileBuffer);
 
     const qrCandidates = [fileBuffer, prep.deskewedBuffer];
@@ -470,6 +532,7 @@ export class OcrService {
         error: err instanceof Error ? err.message : String(err),
       });
     }
+    qrCandidates.length = 0;
     const qr = qrRaw ? parseQrPayload(qrRaw) : null;
     const qrFields = qr && TRACKED_FIELD_KEYS.some((k) => qr.fields[k]) ? qr.fields : null;
     const qrComplete = qrFields !== null && EXPECTED_FIELD_KEYS[docType].every((k) => qrFields[k]);

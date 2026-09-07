@@ -1,0 +1,23 @@
+{
+  "name": "@bses/merged-service",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "type-check": "tsc --noEmit",
+    "clean": "rimraf dist"
+  },
+  "dependencies": {
+    "@bses/auth-service": "*",
+    "@bses/consumer-service": "*",
+    "@bses/notification-service": "*",
+    "@bses/shared": "*",
+    "dotenv": "^16.4.5"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "rimraf": "^5.0.7",
+    "typescript": "^5.5.2"
+  }
+}

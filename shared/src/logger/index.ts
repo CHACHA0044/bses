@@ -1,6 +1,4 @@
 import winston from 'winston';
-import DailyRotateFile from 'winston-daily-rotate-file';
-import path from 'path';
 
 const { combine, timestamp, printf, colorize, errors, json } = winston.format;
 
@@ -45,46 +43,26 @@ const prodFormat = combine(timestamp(), errors({ stack: true }), json());
 
 export interface LoggerOptions {
   service: string;
-  logDir?: string;
 }
 
-export const createLogger = ({ service, logDir = 'logs' }: LoggerOptions): winston.Logger => {
+export const createLogger = ({ service }: LoggerOptions): winston.Logger => {
   const isProduction = process.env['NODE_ENV'] === 'production';
   const isTest = process.env['NODE_ENV'] === 'test';
   const logFormat = process.env['LOG_FORMAT'] ?? 'pretty';
-  const resolvedLogDir = path.resolve(process.cwd(), logDir);
 
   const consoleFormat =
     logFormat === 'json' ? prodFormat : isProduction ? readableFormat : devFormat;
 
+  // Production uses Console only — Render captures stdout/stderr directly.
+  // File logging (DailyRotateFile) is removed to eliminate disk I/O contention,
+  // reduce memory overhead (10 file handles + rotation timers across 5 processes),
+  // and fix delayed log visibility in Render's dashboard.
   const transports: winston.transport[] = [
     new winston.transports.Console({
       format: consoleFormat,
       silent: isTest,
     }),
   ];
-
-  if (isProduction) {
-    transports.push(
-      new DailyRotateFile({
-        dirname: resolvedLogDir,
-        filename: `${service}-%DATE%-combined.log`,
-        datePattern: 'YYYY-MM-DD',
-        maxSize: '20m',
-        maxFiles: '14d',
-        format: prodFormat,
-      }),
-      new DailyRotateFile({
-        dirname: resolvedLogDir,
-        filename: `${service}-%DATE%-error.log`,
-        datePattern: 'YYYY-MM-DD',
-        level: 'error',
-        maxSize: '20m',
-        maxFiles: '30d',
-        format: prodFormat,
-      }),
-    );
-  }
 
   // Production defaults to 'info' so request logs, login attempts, and other
   // diagnostic logs are visible in Render's log stream. Operators can dial

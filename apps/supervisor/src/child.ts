@@ -1,6 +1,7 @@
 import { fork, type ChildProcess } from 'child_process';
 import path from 'path';
 import http from 'http';
+import fs from 'fs';
 import { createLogger } from '@bses/shared';
 import type { ServiceSpec } from './services';
 import { healthUrl } from './services';
@@ -365,6 +366,26 @@ export class ChildManager {
 
   public getChild(): ChildProcess | null {
     return this.child;
+  }
+
+  /**
+   * Reads a child's resident set size (RSS) in bytes from the OS. On Linux we
+   * parse `/proc/<pid>/statm` (2nd field = resident pages); elsewhere this
+   * returns 0 (best-effort). The container's total footprint is what Render
+   * counts against its hard memory cap, so the supervisor sums these to warn
+   * before an OOM kill instead of after a silent restart.
+   */
+  public getRssBytes(): number {
+    const pid = this.status.pid;
+    if (pid == null || process.platform !== 'linux') return 0;
+    try {
+      const statm = fs.readFileSync(`/proc/${pid}/statm`, 'utf8');
+      const residentPages = Number(statm.split(/\s+/)[1]);
+      if (!Number.isFinite(residentPages) || residentPages <= 0) return 0;
+      return residentPages * 4096;
+    } catch {
+      return 0;
+    }
   }
 
   /** True if child is running and confirmed healthy via loopback /health. */

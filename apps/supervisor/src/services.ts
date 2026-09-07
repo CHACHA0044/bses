@@ -4,11 +4,12 @@ import path from 'path';
  * Registry of every logical backend service that the supervisor launches as an
  * isolated child process within a single Render Web Service.
  *
- * Adding a new logical service (6, 7, 8, ...) later requires only:
- *   1. Adding an entry here (name, compiled entrypoint, loopback port, cwd).
- *   2. Adding a proxy row + the corresponding service runtime in the gateway
- *      proxy table (already structured to accept additional upstreams).
- *   3. Re-deploying the SAME Render web service.
+ * NOTE: The auth, consumer, and notification services run INSIDE a single
+ * merged process (`merged`) to stay inside the free-tier 512 MB budget. The
+ * merged process binds three loopback ports (INSIDE_PORT_AUTH/CONSUMER/
+ * NOTIFICATION) on 127.0.0.1 — one per embedded app — while sharing a single
+ * Prisma client / pg Pool. document stays isolated (OCR is memory-heavy) and
+ * gateway is the only public entry.
  */
 export interface ServiceSpec {
   /** Unique logical name. Used in logs, health reporting, and env var naming. */
@@ -18,8 +19,13 @@ export interface ServiceSpec {
    * Each package builds its `src/server.ts` to `dist/server.js` via `tsc`.
    */
   entry: string;
-  /** Loopback port this service binds (127.0.0.1 only — never public). */
+  /** Primary loopback port used for readiness / health checks. */
   port: number;
+  /**
+   * Additional loopback ports the same child process binds (merged services).
+   * Present so port collision validation and gateway env can reach every app.
+   */
+  ports?: number[];
   /**
    * Working directory for the child. Important because document-service's OCR
    * resolves `assets/eng.traineddata.gz` relative to process.cwd(), and each
@@ -38,8 +44,21 @@ const repoRoot = path.resolve(__dirname, '../../..');
 
 const loopback = (port: number): string => `http://127.0.0.1:${port}`;
 
-/** Default specs, with ports overridable via INTERNAL_PORT_<NAME> env vars. */
+const toPort = (raw: string | undefined, fallback: number): number =>
+  raw && Number.isFinite(Number(raw)) ? Number(raw) : fallback;
+
+/**
+ * Default specs, with ports overridable via INTERNAL_PORT_<NAME> env vars.
+ * `merged` aggregates the auth (3010), consumer (3011), and notification (3013)
+ * apps into one process but still exposes each embedded app on its own port so
+ * the gateway proxy table and internal `*_SERVICE_URL` values remain unchanged.
+ */
 export const getServices = (env: NodeJS.ProcessEnv = process.env): ServiceSpec[] => {
+  const authPort = toPort(env['INTERNAL_PORT_AUTH'], 3010);
+  const consumerPort = toPort(env['INTERNAL_PORT_CONSUMER'], 3011);
+  const notificationPort = toPort(env['INTERNAL_PORT_NOTIFICATION'], 3013);
+  const documentPort = toPort(env['INTERNAL_PORT_DOCUMENT'], 3012);
+
   const specs: ServiceSpec[] = [
     {
       name: 'gateway',
@@ -49,38 +68,23 @@ export const getServices = (env: NodeJS.ProcessEnv = process.env): ServiceSpec[]
       isGateway: true,
     },
     {
-      name: 'auth',
-      entry: path.join('services', 'auth-service', 'dist', 'server.js'),
-      port: 3010,
-      cwd: path.join(repoRoot, 'services', 'auth-service'),
-      isGateway: false,
-    },
-    {
-      name: 'consumer',
-      entry: path.join('services', 'consumer-service', 'dist', 'server.js'),
-      port: 3011,
-      cwd: path.join(repoRoot, 'services', 'consumer-service'),
+      name: 'merged',
+      entry: path.join('services', 'merged-service', 'dist', 'server.js'),
+      port: authPort,
+      ports: [authPort, consumerPort, notificationPort],
+      cwd: path.join(repoRoot, 'services', 'merged-service'),
       isGateway: false,
     },
     {
       name: 'document',
       entry: path.join('services', 'document-service', 'dist', 'server.js'),
-      port: 3012,
+      port: documentPort,
       cwd: path.join(repoRoot, 'services', 'document-service'),
-      isGateway: false,
-    },
-    {
-      name: 'notification',
-      entry: path.join('services', 'notification-service', 'dist', 'server.js'),
-      port: 3013,
-      cwd: path.join(repoRoot, 'services', 'notification-service'),
       isGateway: false,
     },
   ];
 
   return specs.map((spec) => {
-    const key = `INTERNAL_PORT_${spec.name.toUpperCase()}`;
-    const raw = env[key];
     if (spec.isGateway) {
       // The gateway is the public entry: it must bind Render's injected PORT
       // (0.0.0.0) when present, falling back to its spec port (3000) locally.
@@ -90,9 +94,6 @@ export const getServices = (env: NodeJS.ProcessEnv = process.env): ServiceSpec[]
           ? Number(publicPort)
           : spec.port;
       return { ...spec, port };
-    }
-    if (raw && Number.isFinite(Number(raw))) {
-      return { ...spec, port: Number(raw) };
     }
     return spec;
   });
@@ -110,22 +111,26 @@ export const buildGatewayEnv = (
 ): NodeJS.ProcessEnv => {
   const envFor = new Map(services.map((s) => [s.name, s]));
   const gateway = envFor.get('gateway');
+  const merged = envFor.get('merged');
+  const document = envFor.get('document');
+
+  const mergedPorts = merged ? merged.ports ?? [merged.port] : [];
 
   return {
     ...env,
     PORT: gateway?.port ? (env['PORT'] ?? String(gateway.port)) : env['PORT'],
-    AUTH_SERVICE_URL: services.find((s) => s.name === 'auth')
-      ? loopback(services.find((s) => s.name === 'auth')!.port)
+    AUTH_SERVICE_URL: merged
+      ? loopback(mergedPorts[0] ?? merged.port)
       : env['AUTH_SERVICE_URL'],
-    CONSUMER_SERVICE_URL: services.find((s) => s.name === 'consumer')
-      ? loopback(services.find((s) => s.name === 'consumer')!.port)
+    CONSUMER_SERVICE_URL: merged
+      ? loopback(mergedPorts[1] ?? merged.port)
       : env['CONSUMER_SERVICE_URL'],
-    DOCUMENT_SERVICE_URL: services.find((s) => s.name === 'document')
-      ? loopback(services.find((s) => s.name === 'document')!.port)
-      : env['DOCUMENT_SERVICE_URL'],
-    NOTIFICATION_SERVICE_URL: services.find((s) => s.name === 'notification')
-      ? loopback(services.find((s) => s.name === 'notification')!.port)
+    NOTIFICATION_SERVICE_URL: merged
+      ? loopback(mergedPorts[2] ?? merged.port)
       : env['NOTIFICATION_SERVICE_URL'],
+    DOCUMENT_SERVICE_URL: document
+      ? loopback(documentPort(services, env))
+      : env['DOCUMENT_SERVICE_URL'],
   };
 };
 
@@ -136,6 +141,10 @@ export const healthUrl = (port: number): string => loopback(port) + '/health';
  * Builds the environment for a NON-gateway child: it must bind its private
  * loopback port, not Render's globally-injected PUBLIC `PORT`. Every other env
  * var is inherited so each service validates its own required variables.
+ *
+ * Note: for a merged service the primary `PORT` is the first embedded app's
+ * port; the embedded apps are reached through INTERNAL_PORT_AUTH/CONSUMER/
+ * NOTIFICATION which are already part of the inherited environment.
  */
 export const buildServiceEnv = (
   env: NodeJS.ProcessEnv,
@@ -147,3 +156,10 @@ export const buildServiceEnv = (
     PORT: String(spec.port),
   };
 };
+
+// Internal helper to keep the document upstream aligned with inherited overrides.
+function documentPort(services: ServiceSpec[], env: NodeJS.ProcessEnv): number {
+  const document = services.find((s) => s.name === 'document');
+  if (document) return document.port;
+  return toPort(env['INTERNAL_PORT_DOCUMENT'], 3012);
+}

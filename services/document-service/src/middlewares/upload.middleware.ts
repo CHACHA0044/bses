@@ -29,7 +29,9 @@ export const uploadMiddleware = multer({
     files: 1,
     fields: 10,
     parts: 20,
-    fieldSize: 1024 * 1024,
+    // 64KB — uploads carry only the file + a few JSON fields; a larger fieldSize
+    // lets a malicious multipart form upload large text parts into memory.
+    fieldSize: 64 * 1024,
   },
   fileFilter: (_req, file, cb) => {
     const ext = path.extname(file.originalname).toLowerCase();

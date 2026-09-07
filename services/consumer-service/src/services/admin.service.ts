@@ -25,13 +25,26 @@ export class AdminService {
     sixMonthsAgo.setDate(1);
     sixMonthsAgo.setHours(0, 0, 0, 0);
 
+    // Registration buckets are aggregated IN THE DATABASE (SQL) instead of
+    // pulling `createdAt` for every user into JS memory. The free tier must not
+    // hold thousands of rows just to draw a dashboard line chart.
+    const registrationBucketQuery = this.prisma.$queryRaw<Array<{ bucket: Date; count: bigint }>>`
+      SELECT
+        date_trunc('day', "createdAt")::date                     AS bucket,
+        COUNT(*)::int::bigint                                     AS count
+      FROM "User"
+      WHERE "createdAt" >= ${sixMonthsAgo}
+      GROUP BY date_trunc('day', "createdAt")::date
+      ORDER BY bucket ASC
+    `;
+
     // Fire ALL independent queries in parallel — no sequential awaits.
     const [
       connectionStats,
       totalConsumers,
       officers,
       genderCounts,
-      recentUsers,
+      registrationBuckets,
       categoryCounts,
     ] = await Promise.all([
       connectionRepository.getDashboardStats(),
@@ -41,11 +54,7 @@ export class AdminService {
         by: ['gender'],
         _count: { id: true },
       }),
-      // Single query covers both monthly (6mo) and daily (14d) windows
-      this.prisma.user.findMany({
-        where: { createdAt: { gte: sixMonthsAgo } },
-        select: { createdAt: true },
-      }),
+      registrationBucketQuery,
       this.prisma.connectionRequest.groupBy({
         by: ['connectionType'],
         _count: { id: true },
@@ -66,10 +75,10 @@ export class AdminService {
       const label = d.toLocaleString('en-US', { month: 'short', year: 'numeric' });
       monthlyMap.set(label, 0);
     }
-    recentUsers.forEach((u) => {
-      const label = u.createdAt.toLocaleString('en-US', { month: 'short', year: 'numeric' });
+    registrationBuckets.forEach(({ bucket, count }) => {
+      const label = new Date(bucket).toLocaleString('en-US', { month: 'short', year: 'numeric' });
       if (monthlyMap.has(label)) {
-        monthlyMap.set(label, (monthlyMap.get(label) || 0) + 1);
+        monthlyMap.set(label, (monthlyMap.get(label) || 0) + Number(count));
       }
     });
     const monthlyRegistrations = Array.from(monthlyMap.entries()).map(([month, count]) => ({ month, count }));
@@ -85,11 +94,12 @@ export class AdminService {
       const label = d.toLocaleString('en-US', { month: 'short', day: 'numeric' });
       dailyMap.set(label, 0);
     }
-    recentUsers.forEach((u) => {
-      if (u.createdAt >= fourteenDaysAgo) {
-        const label = u.createdAt.toLocaleString('en-US', { month: 'short', day: 'numeric' });
+    registrationBuckets.forEach(({ bucket, count }) => {
+      const day = new Date(bucket);
+      if (day >= fourteenDaysAgo) {
+        const label = day.toLocaleString('en-US', { month: 'short', day: 'numeric' });
         if (dailyMap.has(label)) {
-          dailyMap.set(label, (dailyMap.get(label) || 0) + 1);
+          dailyMap.set(label, (dailyMap.get(label) || 0) + Number(count));
         }
       }
     });
