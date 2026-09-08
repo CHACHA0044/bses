@@ -306,12 +306,6 @@ export const LoginForm: React.FC = () => {
               ? 'Warming up the server…'
               : 'Sign In to Dashboard'}
         </Button>
-        {isSubmitting && isWarmingUp && (
-          <p className="text-[11px] text-slate-500 text-center -mt-3 leading-relaxed">
-            First login of a new session can take up to 60 seconds while the backend cluster wakes
-            up. This only happens once — subsequent sign-ins are instant.
-          </p>
-        )}
       </form>
 
       <p className="text-center text-sm text-slate-500">

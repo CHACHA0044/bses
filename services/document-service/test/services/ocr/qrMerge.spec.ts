@@ -20,8 +20,8 @@ const garbledOcr = {
 };
 
 describe('mergeQrAndOcr', () => {
-  it('lets a clean QR read override a garbled OCR read (QR wins on conflict)', () => {
-    const merged = mergeQrAndOcr({ qr: aadhaarQr, ocr: garbledOcr, docType: DocumentType.AADHAAR_CARD });
+  it('lets a VERIFIED QR read override a garbled OCR read (QR wins on conflict)', () => {
+    const merged = mergeQrAndOcr({ qr: aadhaarQr, ocr: garbledOcr, docType: DocumentType.AADHAAR_CARD, qrTrusted: true });
     expect(merged.extractedName).toBe('RAKESH KUMAR');
     expect(merged.extractedDob).toBe('15/08/1990');
     expect(merged.fieldSources).toEqual({
@@ -31,10 +31,31 @@ describe('mergeQrAndOcr', () => {
     });
   });
 
-  it('clears needsReview when the QR covers every expected field', () => {
-    const merged = mergeQrAndOcr({ qr: aadhaarQr, ocr: garbledOcr, docType: DocumentType.AADHAAR_CARD });
+  it('clears needsReview when a VERIFIED QR covers every expected field', () => {
+    const merged = mergeQrAndOcr({ qr: aadhaarQr, ocr: garbledOcr, docType: DocumentType.AADHAAR_CARD, qrTrusted: true });
     expect(merged.needsReview).toBe(false);
     expect(merged.lowConfidenceFields).toEqual([]);
+  });
+
+  it('an UNVERIFIED QR never overrides a conflicting OCR value', () => {
+    // Security trust model: decoded-but-unverified QR loses conflicts to the
+    // value OCR physically read from the document image.
+    const merged = mergeQrAndOcr({ qr: aadhaarQr, ocr: garbledOcr, docType: DocumentType.AADHAAR_CARD });
+    expect(merged.extractedName).toBe('RAKESH KVMAR');
+    expect(merged.fieldSources.extractedName).toBe('ocr');
+    expect(merged.extractedDob).toBe('15/08/1590');
+    expect(merged.fieldSources.extractedDob).toBe('ocr');
+    // Agreeing values keep QR provenance.
+    expect(merged.extractedAadhaar).toBe('123456789012');
+    expect(merged.fieldSources.extractedAadhaar).toBe('qr');
+  });
+
+  it('keeps the OCR review assessment when an UNVERIFIED QR covers all fields', () => {
+    const merged = mergeQrAndOcr({ qr: aadhaarQr, ocr: garbledOcr, docType: DocumentType.AADHAAR_CARD });
+    expect(merged.needsReview).toBe(true);
+    // Both conflicting fields were won by (garbled) OCR, so BOTH stay
+    // low-confidence: an unverified QR resolves nothing it did not win.
+    expect(merged.lowConfidenceFields).toEqual(['extractedDob', 'extractedName']);
   });
 
   it('falls back to OCR per-field when the QR is partial', () => {
@@ -89,7 +110,7 @@ describe('mergeQrAndOcr', () => {
       needsReview: true,
       lowConfidenceFields: ['extractedDob'],
     };
-    const merged = mergeQrAndOcr({ qr: partialQr, ocr, docType: DocumentType.AADHAAR_CARD });
+    const merged = mergeQrAndOcr({ qr: partialQr, ocr, docType: DocumentType.AADHAAR_CARD, qrTrusted: true });
     expect(merged.extractedDob).toBe('15/08/1990');
     expect(merged.fieldSources.extractedDob).toBe('qr');
     expect(merged.lowConfidenceFields).not.toContain('extractedDob');

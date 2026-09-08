@@ -1,5 +1,6 @@
 import { DocumentType } from '@prisma/client';
 import { runModularExtraction, toExtractedData } from './extractors/index';
+import type { Layout } from './layout';
 
 /**
  * Per-field extraction from raw OCR text. Kept deliberately as a pure,
@@ -93,7 +94,8 @@ export const EXTRACTED_FIELD_KEYS = [
 export const EXPECTED_FIELDS: Record<DocumentType, number> = {
   AADHAAR_CARD: 3, // name, dob, aadhaar
   PAN_CARD: 4, // pan, name, father's name, dob
-  ADDRESS_PROOF: 5, // licence number, validity, name, dob, address
+  DRIVING_LICENSE: 5, // licence number, validity, name, dob, address
+  ADDRESS_PROOF: 5, // legacy alias for DL uploads (see ADDRESS_PROOF below)
   OWNERSHIP_PROOF: 5,
   PASSPORT_PHOTO: 2,
   AFFIDAVIT: 3,
@@ -109,6 +111,7 @@ export const EXPECTED_FIELDS: Record<DocumentType, number> = {
 export const EXPECTED_FIELD_KEYS: Record<DocumentType, readonly (keyof ExtractedData)[]> = {
   AADHAAR_CARD: ['extractedName', 'extractedDob', 'extractedAadhaar'],
   PAN_CARD: ['extractedPan', 'extractedName', 'extractedFatherName', 'extractedDob'],
+  DRIVING_LICENSE: ['extractedLicenseNumber', 'extractedName', 'extractedDob', 'extractedAddress', 'extractedValidity'],
   ADDRESS_PROOF: ['extractedLicenseNumber', 'extractedName', 'extractedDob', 'extractedAddress', 'extractedValidity'],
   OWNERSHIP_PROOF: ['extractedName', 'extractedAddress'],
   PASSPORT_PHOTO: ['extractedName'],
@@ -424,7 +427,10 @@ export interface OcrCandidateResult {
   text: string;
   confidence: number;
   extracted: ExtractedData;
+  /** Word-level layout from the OCR engine, when available. */
+  layout?: Layout | undefined;
 }
+
 
 /** Picks the OCR candidate that produced the best structured extraction,
  *  preferring more extracted fields, then higher recognition confidence.

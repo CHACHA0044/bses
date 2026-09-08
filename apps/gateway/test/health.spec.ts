@@ -24,11 +24,8 @@ describe('Gateway Health Endpoints', () => {
   it('GET /ping should return a lightweight keep-alive payload', async () => {
     const res = await request(app).get('/ping');
     expect(res.status).toBe(200);
-    expect(res.body.success).toBe(true);
-    expect(res.body.data.pong).toBe(true);
-    expect(res.body.data.pid).toBeTypeOf('number');
-    expect(res.body.data.uptime).toBeTypeOf('number');
-    expect(res.body.data.rss).toBeTypeOf('number');
+    expect(res.body.pong).toBe(true);
+    expect(res.body.status).toBe('ok');
   });
 
   it('GET /nonexistent should return 404', async () => {

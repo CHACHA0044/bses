@@ -41,3 +41,10 @@ coverage/
 # Prisma generated client (generated at runtime via prisma generate)
 # Do NOT ignore schema.prisma — only generated output
 services/*/node_modules/
+
+# Real identity-document scans must never be committed (PII)
+services/document-service/test/fixtures/
+
+# OCR dev-report artifacts contain raw OCR text (PII) - keep local only
+services/document-service/scripts/ocr-golden-report.md
+services/document-service/scripts/ocr-scan-report.md

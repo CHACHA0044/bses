@@ -150,46 +150,14 @@ export const createApp = (): express.Application => {
   app.get('/ready', readinessHandler);
   app.get('/version', versionHandler);
 
-  // Lightweight keep-alive endpoint. No CPU work, no background requests,
-  // no in-memory counters — just a minimal response proving the process is alive.
-  // Render's idle spin-down is prevented by external traffic (users, Vercel frontend),
-  // not by localhost self-pings which have no effect on Render's idle detection.
+  // Lightweight keep-alive endpoint for the server-side loop in keepAlive.ts.
+  // Deliberately extremely simple: a bare HTTP 200 JSON — no counters, no DB
+  // calls, no CPU work, no retained state. Each hit stays visible in the HTTP
+  // request logs (requestLogger does not skip /ping). It can only be reached
+  // while the gateway process is actually running; it cannot wake a Render
+  // container after Render has suspended it.
   app.get('/ping', (_req, res) => {
-    try {
-      const supervisor = getSupervisorStatus();
-      const childServices = supervisor
-        ? supervisor.services.reduce<Record<string, string>>((acc, s) => {
-            acc[s.name] = s.state;
-            return acc;
-          }, {})
-        : null;
-
-      sendSuccess(res, {
-        pong: true,
-        pid: process.pid,
-        uptime: Math.round(process.uptime()),
-        rss: Math.round(process.memoryUsage().rss / 1024 / 1024),
-        services: childServices,
-        supervisor: supervisor
-          ? {
-              pid: supervisor.supervisor.pid,
-              uptimeSeconds: supervisor.supervisor.uptimeSeconds,
-              state: supervisor.supervisor.state,
-            }
-          : null,
-      });
-    } catch (err) {
-      // /ping must never 5xx
-      console.error('[/ping] unexpected error:', err);
-      try {
-        res.status(200).json({
-          success: true,
-          data: { pong: true, degraded: true, error: err instanceof Error ? err.message : 'unknown' },
-        });
-      } catch {
-        /* response already sent */
-      }
-    }
+    res.status(200).json({ pong: true, status: 'ok' });
   });
 
   // Aggregated status: gateway + supervisor + every internal service.

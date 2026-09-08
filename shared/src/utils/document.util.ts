@@ -66,6 +66,14 @@ export interface RawDocument {
   ocrPageResults?: unknown | null;
   ocrFieldDetails?: unknown | null;
   ocrMetrics?: unknown | null;
+  // ── Multi-signal verification metadata ──
+  ocrQrStatus?: string | null;
+  ocrQrFormat?: string | null;
+  ocrQualityScore?: DecimalLike | number | bigint | string | null;
+  ocrRiskScore?: DecimalLike | number | bigint | string | null;
+  ocrConflicts?: unknown | null;
+  ocrWarnings?: unknown | null;
+  ocrDetectedSource?: string | null;
 }
 
 export interface DocumentOcrData {
@@ -115,6 +123,20 @@ export interface DocumentView {
   ocrDetectedType: string | null;
   /** Engine languages used for this run (e.g. "eng", "eng+hin"). */
   ocrLanguages: string | null;
+  /** QR verification outcome: NONE / DECODED_UNVERIFIED / SIGNED_VERIFIED / SIGNATURE_INVALID / UNVERIFIABLE. */
+  ocrQrStatus: string | null;
+  /** QR payload format detected (e.g. "aadhaar-print-letter", "aadhaar-secure"). */
+  ocrQrFormat: string | null;
+  /** Image-quality gate score (0..1) from the quality assessment pass. */
+  ocrQualityScore: number | null;
+  /** Aggregate fraud/tamper risk score (0..1); higher = more suspicious. */
+  ocrRiskScore: number | null;
+  /** Per-field conflicts detected between independent sources (QR vs OCR). */
+  ocrConflicts: unknown | null;
+  /** Machine-readable risk signals (code, severity, message). */
+  ocrWarnings: unknown | null;
+  /** How the physical type was decided: declared / ocr-text / qr / mixed. */
+  ocrDetectedSource: string | null;
   // ── Admin-only diagnostics (present only when includeRawText is true) ──
   ocrLastError?: string | null;
   ocrPageResults?: unknown | null;
@@ -315,6 +337,13 @@ export const toDocumentView = (
     ocrAttempts: doc.ocrAttempts ?? 0,
     ocrDetectedType: doc.ocrDetectedType ?? null,
     ocrLanguages: doc.ocrLanguages ?? null,
+    ocrQrStatus: doc.ocrQrStatus ?? null,
+    ocrQrFormat: doc.ocrQrFormat ?? null,
+    ocrQualityScore: doc.ocrQualityScore == null ? null : Number(doc.ocrQualityScore.toString()),
+    ocrRiskScore: doc.ocrRiskScore == null ? null : Number(doc.ocrRiskScore.toString()),
+    ocrConflicts: doc.ocrConflicts ?? null,
+    ocrWarnings: doc.ocrWarnings ?? null,
+    ocrDetectedSource: doc.ocrDetectedSource ?? null,
     ...(includeRawText
       ? {
           ocrLastError: doc.ocrLastError ?? null,

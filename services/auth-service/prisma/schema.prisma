@@ -52,6 +52,7 @@ enum DocumentType {
   PAN_CARD
   ADDRESS_PROOF
   OWNERSHIP_PROOF
+  DRIVING_LICENSE
   PASSPORT_PHOTO
   AFFIDAVIT
   OTHER
@@ -415,6 +416,23 @@ model Document {
   ocrFieldDetails    Json?        @map("ocr_field_details")
   // Run-level diagnostics: timings, errorCode, candidateCount, orientation, etc.
   ocrMetrics         Json?        @map("ocr_metrics")
+
+  // ── Multi-signal verification metadata ──────────────────────────────────
+  // QR verification outcome: NONE / DECODED_UNVERIFIED / SIGNED_VERIFIED /
+  // SIGNATURE_INVALID / UNVERIFIABLE (see ocr/qrSignature.ts).
+  ocrQrStatus        String?      @map("ocr_qr_status") @db.VarChar(30)
+  // QR payload format detected (e.g. "aadhaar-print-letter", "aadhaar-secure").
+  ocrQrFormat        String?      @map("ocr_qr_format") @db.VarChar(40)
+  // Image-quality gate score (0..1) from the pre-OCR quality pass.
+  ocrQualityScore    Decimal?     @map("ocr_quality_score") @db.Decimal(5, 2)
+  // Aggregate fraud/tamper risk score (0..1); higher = more suspicious.
+  ocrRiskScore       Decimal?     @map("ocr_risk_score") @db.Decimal(5, 2)
+  // Per-field conflicts detected between independent sources (QR vs OCR).
+  ocrConflicts       Json?        @map("ocr_conflicts")
+  // Machine-readable risk signals (code, severity, message) — no raw PII.
+  ocrWarnings        Json?        @map("ocr_warnings")
+  // How the physical type was decided: declared / ocr-text / qr / mixed.
+  ocrDetectedSource  String?      @map("ocr_detected_source") @db.VarChar(30)
 
   user              User               @relation(fields: [userId], references: [id], onDelete: Restrict)
   connectionRequest ConnectionRequest? @relation(fields: [connectionRequestId], references: [id])

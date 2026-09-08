@@ -10,6 +10,18 @@ import { DocumentType, Prisma, OcrJobStatus } from '@prisma/client';
 import { buildExtractedResult, selectBestCandidate, OcrCandidateResult, ExtractedData, EXPECTED_FIELD_KEYS } from './ocr/extractors';
 import type { PreparedImage } from './ocr/preprocess';
 import { parseQrPayload } from './ocr/qrPayload';
+import { verifyQrSignature } from './ocr/qrSignature';
+import { assessImageQuality } from './ocr/imageQuality';
+import { decideDocument } from './ocr/decisionEngine';
+import { evaluatePan } from './ocr/panOcr';
+import { isValidAadhaar } from './ocr/verhoeff';
+import { PaddleOcrClient } from './ocr/paddleClient';
+import { extractLayoutFromTesseract } from './ocr/layout';
+import type { Layout } from './ocr/layout';
+import type { ImageQualityScore } from './ocr/imageQuality';
+import type { QrVerificationStatus } from './ocr/qrSignature';
+import type { DocumentDecision, RiskSignal } from './ocr/decisionEngine';
+import type { DecisionStatus } from './ocr/decisionEngine';
 import { mergeQrAndOcr, MergedExtraction, TRACKED_FIELD_KEYS } from './ocr/qrMerge';
 import { notificationClient } from './notification.client';
 import { config } from '../config';
@@ -183,10 +195,12 @@ const buildCandidateResult = (
   text: string,
   confidence: number,
   docType: DocumentType,
+  layout?: Layout,
 ): OcrCandidateResult => ({
   text,
   confidence,
   extracted: buildExtractedResult(text, confidence, docType),
+  layout,
 });
 
 /**
@@ -197,10 +211,65 @@ const buildCandidateResult = (
  */
 const QR_CONFIDENCE = 99;
 
+/** Maps the decision-engine status onto the durable OcrJobStatus enum. */
+const toOcrJobStatus = (status: DecisionStatus): OcrJobStatus => {
+  switch (status) {
+    case 'EXTRACTED':
+      return OcrJobStatus.EXTRACTED;
+    case 'PARTIAL':
+      return OcrJobStatus.PARTIAL;
+    case 'NEEDS_REVIEW':
+      return OcrJobStatus.NEEDS_REVIEW;
+    case 'UNREADABLE':
+      return OcrJobStatus.UNREADABLE;
+    case 'FAILED':
+      return OcrJobStatus.FAILED;
+  }
+};
+
+/** Derives the durable job status (PARTIAL supported via the decision engine). */
+const deriveJobStatus = (meta: ExtractedDataWithMeta): OcrJobStatus => {
+  if (meta.decision) return toOcrJobStatus(meta.decision.status);
+  if (meta.extracted.isUnreadable) return OcrJobStatus.UNREADABLE;
+  if (meta.extracted.needsReview) return OcrJobStatus.NEEDS_REVIEW;
+  if (meta.extracted.lowConfidenceFields && meta.extracted.lowConfidenceFields.length > 0) {
+    return OcrJobStatus.NEEDS_REVIEW;
+  }
+  return OcrJobStatus.EXTRACTED;
+};
+
+/** Copies decision flags back onto the extraction object for view/UI logic. */
+const applyDecisionToExtraction = (extracted: ExtractedData, decision: DocumentDecision): void => {
+  extracted.isUnreadable = decision.unreadable;
+  extracted.needsReview = decision.needsReview;
+  extracted.lowConfidenceFields = Object.entries(decision.fields)
+    .filter(([, f]) => f.confidence < 0.6)
+    .map(([k]) => k);
+  if (decision.conflicts.length > 0) extracted.needsReview = true;
+};
+
+/** Reduces an extraction to { fieldKey: stringValue } for cross-source comparison. */
+const toSimpleFieldMap = (d: ExtractedData | null | undefined): Record<string, string> => {
+  const out: Record<string, string> = {};
+  if (!d) return out;
+  for (const [k, v] of Object.entries(d)) {
+    if (typeof v === 'string' && v.length > 0) out[k] = v;
+  }
+  return out;
+};
+
 export interface ExtractedDataWithMeta {
   extracted: ExtractedData;
   ocrConfidence: number;
   text: string;
+  /** Image-quality gate score, when the image was assessed. */
+  quality?: ImageQualityScore;
+  /** Multi-signal decision (present for image + PDF pipelines). */
+  decision?: DocumentDecision;
+  /** QR verification outcome (NONE / DECODED_UNVERIFIED / SIGNED_VERIFIED / ...). */
+  qrVerificationStatus?: QrVerificationStatus | null;
+  qrFormat?: string | null;
+  secondaryOcrUsed?: boolean;
 }
 
 /** Page segmentation mode per document type: ID cards are roughly one block
@@ -209,6 +278,7 @@ const PAGE_SEG_MODE: Partial<Record<DocumentType, Tesseract.PSM>> = {
   AADHAAR_CARD: PSM.SINGLE_BLOCK,
   PAN_CARD: PSM.SINGLE_BLOCK,
   ADDRESS_PROOF: PSM.SINGLE_BLOCK,
+  DRIVING_LICENSE: PSM.SINGLE_BLOCK,
   OWNERSHIP_PROOF: PSM.AUTO,
   AFFIDAVIT: PSM.AUTO,
   OTHER: PSM.AUTO,
@@ -235,7 +305,23 @@ const recognizeBuffer = async (
     }
   }
   const { data } = await worker.recognize(candidate);
-  return buildCandidateResult(data.text ?? '', data.confidence ?? 0, docType);
+
+  // Extract word-level layout for layout-aware extraction (best-effort)
+  let layout: Layout | undefined;
+  try {
+    const raw = data as unknown as {
+      words: Array<{ text: string; confidence: number; bbox: { x: number; y: number; width: number; height: number }; line?: number }>;
+      width: number;
+      height: number;
+    };
+    if (raw?.words && raw?.width && raw?.height) {
+      layout = extractLayoutFromTesseract(raw, raw.width, raw.height);
+    }
+  } catch {
+    /* Layout extraction is best-effort */
+  }
+
+  return buildCandidateResult(data.text ?? '', data.confidence ?? 0, docType, layout);
 };
 
 /**
@@ -408,13 +494,7 @@ export class OcrService {
       }
 
       const elapsedMs = Date.now() - startedAt;
-      const status: OcrJobStatus = meta.extracted.isUnreadable
-        ? OcrJobStatus.UNREADABLE
-        : meta.extracted.needsReview
-          ? OcrJobStatus.NEEDS_REVIEW
-          : meta.extracted.lowConfidenceFields && meta.extracted.lowConfidenceFields.length > 0
-            ? OcrJobStatus.NEEDS_REVIEW
-            : OcrJobStatus.EXTRACTED;
+      const status: OcrJobStatus = deriveJobStatus(meta);
 
       const fieldDetails: Record<string, { confidence: number; source: string | 'unknown' }> = {};
       const confidences = meta.extracted.fieldConfidences ?? {};
@@ -463,12 +543,85 @@ export class OcrService {
         };
 
         await this.prisma.document.update({ where: { id: documentId }, data });
+        await this.persistVerificationMeta(documentId, meta);
         await this.notifyIfNeeded(documentId, previousStatus, status);
         logger.info(`OCR complete for ${documentId}: status=${status} conf=${meta.ocrConfidence} in ${elapsedMs}ms`);
       } catch (err) {
         logger.error(`Persist failed for ${documentId}`, { error: err });
         await this.fail(documentId, tryString(err));
       }
+  }
+
+  /**
+   * Runs the optional PaddleOCR sidecar on a prepared image. Returns a
+   * candidate result or null (never throws). Requires OCR_PADDLE_ENABLED=true.
+   */
+  private async trySecondaryOcr(candidate: Buffer, docType: DocumentType): Promise<OcrCandidateResult | null> {
+    try {
+      const client = new PaddleOcrClient(
+        config.OCR_PADDLE_URL,
+        config.OCR_PADDLE_ENABLED,
+        config.OCR_PADDLE_TIMEOUT_MS,
+      );
+      const res = await client.recognize(candidate, 'auto');
+      if (!res) return null;
+      const texts = res.results.map((l) => l.text).filter((t) => t.trim().length > 0);
+      if (texts.length === 0) return null;
+      const text = texts.join('\n');
+      const avgConf = res.results.reduce((acc, l) => acc + l.confidence, 0) / Math.max(1, res.results.length);
+      const conf = Math.max(30, Math.min(99, Math.round(avgConf * 100)));
+      return buildCandidateResult(text, conf, docType);
+    } catch (err) {
+      logger.warn('Secondary OCR failed', { error: tryString(err) });
+      return null;
+    }
+  }
+
+  /** Per-field agreement map between two engine extractions (normalized). */
+  private computeAgreement(a: ExtractedData, b: ExtractedData): Record<string, boolean> {
+    const out: Record<string, boolean> = {};
+    const ma = toSimpleFieldMap(a);
+    const mb = toSimpleFieldMap(b);
+    const normalize = (v: string): string => v.replace(/[\s-]|[/]/g, '').toUpperCase();
+    for (const key of TRACKED_FIELD_KEYS) {
+      const va = ma[key];
+      const vb = mb[key];
+      if (va && vb) out[key] = normalize(va) === normalize(vb);
+    }
+    return out;
+  }
+
+  /**
+   * Persists multi-signal verification metadata. Kept separate from the main
+   * persist so a migration gap can never fail OCR itself.
+   */
+  private async persistVerificationMeta(documentId: string, meta: ExtractedDataWithMeta): Promise<void> {
+    if (!meta.quality && !meta.decision && !meta.qrVerificationStatus) return;
+    try {
+      await this.prisma.document.update({
+        where: { id: documentId },
+        data: {
+          ocrQrStatus: meta.qrVerificationStatus ?? null,
+          ocrQrFormat: meta.qrFormat ?? null,
+          ocrQualityScore: meta.quality ? new Prisma.Decimal(Math.round(meta.quality.overall * 100) / 100) : null,
+          ocrRiskScore: meta.decision ? new Prisma.Decimal(meta.decision.riskScore) : null,
+          ocrConflicts:
+            meta.decision && meta.decision.conflicts.length > 0
+              ? (meta.decision.conflicts as Prisma.InputJsonValue)
+              : Prisma.DbNull,
+          ocrWarnings:
+            meta.decision && meta.decision.warnings.length > 0
+              ? (meta.decision.warnings as Prisma.InputJsonValue)
+              : Prisma.DbNull,
+          ocrDetectedSource: meta.extracted.detectedType ? 'mixed' : null,
+        },
+      });
+    } catch (err) {
+      logger.warn(
+        'persistVerificationMeta failed for ' + documentId + ' (migration may not be applied yet)',
+        { error: tryString(err) },
+      );
+    }
   }
 
   private async fail(documentId: string, error: string): Promise<void> {
@@ -553,6 +706,19 @@ export class OcrService {
     const prepareImage = await getPrepareImage();
     const prep = await prepareImage(fileBuffer);
 
+    // Image-quality gate: scored BEFORE OCR so poor images are reported
+    // honestly instead of producing confident-looking garbage.
+    const quality = await assessImageQuality({
+      buffer: fileBuffer,
+      inkRatio: prep.inkRatio,
+      skewAngle: prep.skewAngle,
+    });
+    if (quality.overall < config.OCR_QUALITY_GATE) {
+      logger.info(
+        `Image quality ${quality.overall.toFixed(2)} below gate for ${documentId}: ${quality.issues.join(', ')}`,
+      );
+    }
+
     const qrCandidates = [fileBuffer, prep.deskewedBuffer];
     if (prep.atBoundary) qrCandidates.push(prep.flatBuffer);
     let qrRaw: string | null = null;
@@ -572,8 +738,14 @@ export class OcrService {
     let merged: MergedExtraction;
     let text: string;
     let confidence: number;
+    let secondaryAgreement: Record<string, boolean> | undefined;
 
-    if (qrComplete) {
+    // NEVER trust an unverified QR: only a cryptographically verified
+    // secure-QR payload may skip the slower OCR pass.
+    const verification = qr ? verifyQrSignature(qr.raw, qr.format) : null;
+    const qrTrusted = verification?.status === 'SIGNED_VERIFIED';
+
+    if (qrComplete && qrTrusted) {
       text = qr?.raw ?? '';
       confidence = QR_CONFIDENCE;
       merged = mergeQrAndOcr({ qr: qrFields, ocr: null, docType });
@@ -588,19 +760,86 @@ export class OcrService {
         const r = await recognizeBuffer(candidates[i]!, docType, i);
         results.push(r);
       }
-      const winner = selectBestCandidate(results);
+      const winner0 = selectBestCandidate(results);
+      let winner = winner0;
+
+      // Secondary OCR fallback: only when the primary engine is weak AND
+      // the sidecar is enabled. The better candidate wins; agreement is
+      // recorded for the decision engine when both engines saw fields.
+      if (winner.confidence < config.OCR_SECONDARY_THRESHOLD) {
+        const paddle = await this.trySecondaryOcr(prep.deskewedBuffer, docType);
+        if (paddle) {
+          results.push(paddle);
+          secondaryAgreement = this.computeAgreement(winner0.extracted, paddle.extracted);
+          const before = winner;
+          winner = selectBestCandidate(results);
+          logger.info(
+            `Secondary OCR used for ${documentId}: primary conf ${before.confidence} -> best ${winner.confidence}`,
+          );
+        }
+      }
       if (prep.atBoundary) {
         logger.info(`Deskew estimate at scan boundary; compared ${results.length} OCR variants for ${documentId}`);
       }
       text = winner.text;
       confidence = winner.confidence;
-      merged = mergeQrAndOcr({ qr: qrFields, ocr: winner.extracted, docType });
+      merged = mergeQrAndOcr({ qr: qrFields, ocr: winner.extracted, docType, qrTrusted });
       if (qrFields) {
         logger.info(`QR partial (${qr?.format}) for ${documentId}; OCR filled the gaps`);
       }
     }
 
-    return { extracted: merged, ocrConfidence: confidence, text };
+    // ── Cross-source + multi-signal decision ────────────────────────────
+    const checksumValid: Record<string, boolean> = {};
+    if (/^\d{12}$/.test(merged.extractedAadhaar ?? '')) {
+      checksumValid.extractedAadhaar = isValidAadhaar(merged.extractedAadhaar!);
+    }
+
+    const extraRisks: RiskSignal[] = [];
+    if (merged.extractedPan) {
+      const panEval = evaluatePan(merged.extractedPan);
+      if (panEval.ambiguous) {
+        extraRisks.push({
+          code: 'PAN_AMBIGUOUS',
+          severity: 'warning',
+          message: `PAN ${merged.extractedPan} is OCR-ambiguous; all valid candidates: ${panEval.candidates.map((c) => c.value).join(' / ')}`,
+        });
+      }
+      if (panEval.category && !panEval.categoryRecognized) {
+        extraRisks.push({
+          code: 'PAN_CATEGORY_UNRECOGNIZED',
+          severity: 'info',
+          message: `PAN category character '${panEval.category}' is not a recognized holder category`,
+        });
+      }
+    }
+
+    const decision = decideDocument({
+      declaredType: docType,
+      detectedType: merged.detectedType ?? null,
+      qrStatus: verification?.status ?? null,
+      qrFields: toSimpleFieldMap(qrFields),
+      ocrFields: toSimpleFieldMap(merged),
+      fieldConfidences: merged.fieldConfidences,
+      ocrConfidence: confidence,
+      expectedKeys: EXPECTED_FIELD_KEYS[docType],
+      imageQuality: { overall: quality.overall, issues: quality.issues },
+      checksumValid,
+      secondaryAgreement,
+      extraRisks,
+    });
+    applyDecisionToExtraction(merged, decision);
+
+    return {
+      extracted: merged,
+      ocrConfidence: confidence,
+      text,
+      quality,
+      decision,
+      qrVerificationStatus: verification?.status ?? null,
+      qrFormat: qr?.format ?? null,
+      secondaryOcrUsed: !!secondaryAgreement,
+    };
   }
 
   /**
@@ -708,7 +947,26 @@ export class OcrService {
       confidence = computePdfConfidence(text, extracted, docType);
     }
 
-    return { extracted, ocrConfidence: confidence, text };
+    const pdfDecision = decideDocument({
+      declaredType: docType,
+      detectedType: extracted.detectedType ?? null,
+      qrStatus: null,
+      ocrFields: toSimpleFieldMap(extracted),
+      fieldConfidences: extracted.fieldConfidences,
+      ocrConfidence: confidence,
+      expectedKeys: EXPECTED_FIELD_KEYS[docType],
+      imageQuality: null,
+    });
+    applyDecisionToExtraction(extracted, pdfDecision);
+
+    return {
+      extracted,
+      ocrConfidence: confidence,
+      text,
+      decision: pdfDecision,
+      qrVerificationStatus: null,
+      qrFormat: null,
+    };
   }
 }
 

@@ -4,28 +4,60 @@ import { Transform } from 'stream';
 export class EncryptionService {
   private readonly algorithm = 'aes-256-cbc';
 
-  private getKey(): Buffer {
-    const hexKey = process.env.AES_SECRET_KEY || '0000000000000000000000000000000000000000000000000000000000000000';
+  private getKey(keyVersion?: string): Buffer {
+    // v2 envelopes carry a keyVersion so keys can be rotated without a data
+    // migration: new records are written with the current key; old records
+    // decrypt with the previous key until re-encrypted.
+    const hexKey =
+      keyVersion === 'k2'
+        ? process.env.AES_SECRET_KEY_PREVIOUS
+        : process.env.AES_SECRET_KEY;
+    if (!hexKey || !/^[0-9a-fA-F]{64}$/.test(hexKey)) {
+      throw new Error('AES_SECRET_KEY must be set to a 64 hex-character key');
+    }
     return Buffer.from(hexKey, 'hex');
   }
 
+  /** Legacy fixed IV — used for decrypting pre-v2 records and GridFS blobs. */
   private getIv(): Buffer {
-    const hexIv = process.env.AES_IV || '00000000000000000000000000000000';
+    const hexIv = process.env.AES_IV;
+    if (!hexIv || !/^[0-9a-fA-F]{32}$/.test(hexIv)) {
+      throw new Error('AES_IV must be set to a 32 hex-character IV');
+    }
     return Buffer.from(hexIv, 'hex');
   }
 
   // --- String Methods (for Postgres PII fields) ---
 
+  /**
+   * Encrypts a string field with per-record random IVs (v2 envelope):
+   *   `v2:<keyVersion>:<ivHex>:<cipherHex>`
+   * Random IVs eliminate the repeated-IV weakness of fixed-IV CBC. `decrypt`
+   * transparently reads v2 and the legacy (fixed-IV) format, so nothing
+   * already stored breaks.
+   */
   public encrypt(plaintext: string): string {
     if (!plaintext) return plaintext;
-    const cipher = crypto.createCipheriv(this.algorithm, this.getKey(), this.getIv());
+    const iv = crypto.randomBytes(16);
+    const cipher = crypto.createCipheriv(this.algorithm, this.getKey(), iv);
     let encrypted = cipher.update(plaintext, 'utf8', 'hex');
     encrypted += cipher.final('hex');
-    return encrypted;
+    return `v2:k1:${iv.toString('hex')}:${encrypted}`;
   }
 
   public decrypt(ciphertext: string): string {
     if (!ciphertext) return ciphertext;
+    const v2 = ciphertext.match(/^v2:(k[12]):([0-9a-f]{32}):([0-9a-f]+)$/i);
+    if (v2) {
+      const keyVersion = v2[1] as 'k1' | 'k2';
+      const iv = Buffer.from(v2[2]!, 'hex');
+      const ciphertextHex = v2[3]!;
+      const decipher = crypto.createDecipheriv(this.algorithm, this.getKey(keyVersion), iv);
+      let decrypted = decipher.update(ciphertextHex, 'hex', 'utf8');
+      decrypted += decipher.final('utf8');
+      return decrypted;
+    }
+    // Legacy ciphertext (fixed shared IV) — kept readable forever.
     const decipher = crypto.createDecipheriv(this.algorithm, this.getKey(), this.getIv());
     let decrypted = decipher.update(ciphertext, 'hex', 'utf8');
     decrypted += decipher.final('utf8');

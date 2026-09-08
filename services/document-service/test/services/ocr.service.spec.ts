@@ -6,6 +6,7 @@ import { PDFParse } from 'pdf-parse';
 import { prepareImage } from '../../src/services/ocr/preprocess';
 import { decodeQrFromImage } from '../../src/services/ocr/qr';
 import { parseQrPayload } from '../../src/services/ocr/qrPayload';
+import { verifyQrSignature } from '../../src/services/ocr/qrSignature';
 
 const h = vi.hoisted(() => {
   return {
@@ -79,6 +80,24 @@ vi.mock('../../src/services/ocr/qrPayload', () => ({
   })),
 }));
 
+/**
+ * QR signature verification mock. No UIDAI public key is configured in the
+ * test environment, so the default result is DECODED_UNVERIFIED — mirroring
+ * the real `verifyQrSignature` gate, where a missing key means UNVERIFIABLE.
+ * Individual tests that need a trusted QR mock SIGNED_VERIFIED explicitly
+ * via `mockReturnValueOnce`.
+ */
+vi.mock('../../src/services/ocr/qrSignature', () => {
+  type QrVerifyResult = { status: string; reason: string; algorithm?: string };
+  const defaultResult: QrVerifyResult = {
+    status: 'DECODED_UNVERIFIED',
+    reason: 'test: no UIDAI key configured',
+  };
+  return {
+    verifyQrSignature: vi.fn((_payload: string, _format: string): QrVerifyResult => defaultResult),
+  };
+});
+
 vi.mock('../../src/services/notification.client', () => ({
   notificationClient: { notifyDocumentVerificationPending: vi.fn().mockResolvedValue(undefined) },
 }));
@@ -113,14 +132,26 @@ const makeDoc = (id: string, docType: DocumentType, mimeType = 'image/png') => (
   isUnreadable: false,
 });
 
+/**
+ * The MAIN persist call is the one containing the encrypted PII columns.
+ * The pipeline now issues a second `update` right after it
+ * (`persistVerificationMeta`), so "last call" is no longer the main persist.
+ */
 const lastUpdate = (): { data: Record<string, unknown> } => {
-  const call = mockPrisma.document.update.mock.calls.at(-1)!;
-  return call[0] as { data: Record<string, unknown> };
+  const calls = mockPrisma.document.update.mock.calls as Array<[{ data: Record<string, unknown> }]>;
+  const main = calls.filter((c) => 'ocrRawTextEncrypted' in c[0].data).at(-1);
+  return (main ?? calls.at(-1)!)[0] as { data: Record<string, unknown> };
+};
+
+/** The verification-meta update (qr status / quality / risk columns), if any. */
+const verificationUpdate = (): Record<string, unknown> | undefined => {
+  const calls = mockPrisma.document.update.mock.calls as Array<[{ data: Record<string, unknown> }]>;
+  return calls.map((c) => c[0].data).find((d) => 'ocrQrStatus' in d);
 };
 
 describe('OcrService', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.clearAllMocks();;
     mockCurrentDoc.value = null;
     mockBucketFind.mockReturnValue({
       toArray: async () => [{ metadata: { encrypted: false } }],
@@ -151,7 +182,7 @@ describe('OcrService', () => {
     mockRecognize.mockResolvedValueOnce({
       data: {
         confidence: 95,
-        text: 'Government of India\nUnique Identification Authority of India\ndob: 15/08/1990\n1234 5678 9012\nMale',
+        text: 'Government of India\nUnique Identification Authority of India\ndob: 15/08/1990\n2345 6789 0124\nMale',
       },
     });
 
@@ -160,8 +191,9 @@ describe('OcrService', () => {
     const persisted = lastUpdate().data as Record<string, string>;
     // Round-trip: the FULL 12-digit number must survive OCR→encrypt→decrypt
     // (persisting only the last 4 digits is irreversible data loss).
+    // 234567890124 passes the Verhoeff checksum enforced by the pipeline.
     expect(encryptionService.decrypt(persisted.extractedAadhaarEncrypted)).toBe(
-      '123456789012',
+      '234567890124',
     );
     expect(encryptionService.decrypt(persisted.extractedDobEncrypted)).toBe('15/08/1990');
     expect(persisted).toEqual(
@@ -213,12 +245,12 @@ describe('OcrService', () => {
     expect(mockRecognize).toHaveBeenCalled();
   });
 
-  it('should skip OCR entirely when a QR read is authoritative (QR-first)', async () => {
+  it('should skip OCR entirely when a QR read is complete AND cryptographically verified', async () => {
     mockCurrentDoc.value = makeDoc('doc4', DocumentType.AADHAAR_CARD);
     const qrFields = {
       extractedName: 'RAKESH KUMAR',
       extractedDob: '15/08/1990',
-      extractedAadhaar: '123456789012',
+      extractedAadhaar: '234567890124', // Verhoeff-valid
       fieldSources: {},
     };
     vi.mocked(decodeQrFromImage).mockResolvedValueOnce('base64/xml wrapper');
@@ -228,6 +260,13 @@ describe('OcrService', () => {
       hasPhoto: false,
       fields: qrFields,
       errors: [],
+    });
+    // Simulate a payload whose XML-DSIG signature validated against the
+    // configured UIDAI public key — only then may QR skip OCR.
+    vi.mocked(verifyQrSignature).mockReturnValueOnce({
+      status: 'SIGNED_VERIFIED',
+      reason: 'test: signature valid against configured UIDAI public key',
+      algorithm: 'RSA-SHA256',
     });
 
     await ocrService.processNow('doc4');
@@ -247,6 +286,52 @@ describe('OcrService', () => {
         extractedAadhaarEncrypted: expect.any(String),
       }),
     );
+    // Verification provenance must be persisted alongside the extraction.
+    expect(verificationUpdate()).toEqual(
+      expect.objectContaining({ ocrQrStatus: 'SIGNED_VERIFIED' }),
+    );
+  });
+
+  it('must NOT skip OCR when the QR is complete but NOT cryptographically verified', async () => {
+    // Security regression guard: a decoded-but-unverified QR is never
+    // authoritative — OCR must still run and corroborate the fields.
+    mockCurrentDoc.value = makeDoc('doc8', DocumentType.AADHAAR_CARD);
+    const qrFields = {
+      extractedName: 'UNVERIFIED PERSON',
+      extractedDob: '15/08/1990',
+      extractedAadhaar: '234567890124',
+      fieldSources: {},
+    };
+    vi.mocked(decodeQrFromImage).mockResolvedValueOnce('self-made qr payload');
+    vi.mocked(parseQrPayload).mockReturnValueOnce({
+      format: 'aadhaar-secure',
+      raw: '<Data>[omitted]</Data>',
+      hasPhoto: false,
+      fields: qrFields,
+      errors: [],
+    });
+    // Unverified payload: signature check fails, so OCR must corroborate.
+    vi.mocked(verifyQrSignature).mockReturnValueOnce({
+      status: 'DECODED_UNVERIFIED',
+      reason: 'test: self-made QR has no valid UIDAI signature',
+    });
+    mockRecognize.mockResolvedValueOnce({
+      data: {
+        confidence: 90,
+        text: 'Government of India\n2345 6789 0124\nDOB: 15/08/1990\nName: RAKESH KUMAR',
+      },
+    });
+
+    await ocrService.processNow('doc8');
+
+    expect(mockRecognize).toHaveBeenCalledTimes(1);
+    expect(lastUpdate().data).toEqual(
+      expect.objectContaining({
+        // The QR name conflicts with the name OCR read from the document image.
+        // The unverified QR must NOT win that conflict.
+        ocrFieldSources: expect.objectContaining({ extractedName: 'ocr' }),
+      }),
+    );
   });
 
   it('should fill QR gaps with OCR and record per-field sources', async () => {
@@ -262,7 +347,7 @@ describe('OcrService', () => {
     mockRecognize.mockResolvedValueOnce({
       data: {
         confidence: 92,
-        text: '1234 5678 9012\nDOB: 15/08/1990\nRAKESH KUMAR',
+        text: '2345 6789 0124\nDOB: 15/08/1990\nRAKESH KUMAR',
       },
     });
 

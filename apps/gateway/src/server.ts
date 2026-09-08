@@ -3,6 +3,7 @@ import { createApp } from './app';
 import { config } from './config';
 import { createLogger } from '@bses/shared';
 import { setSupervisorStatus } from './supervisorStatus';
+import { startKeepAlive } from './keepAlive';
 
 const logger = createLogger({ service: 'gateway' });
 
@@ -41,8 +42,20 @@ const start = async (): Promise<void> => {
     logger.info('Gateway running', { port: config.PORT, env: config.NODE_ENV });
   });
 
-  process.on('SIGTERM', () => logger.info('SIGTERM received — keeping Gateway running 24/7 (shutdown ignored)'));
-  process.on('SIGINT', () => logger.info('SIGINT received — keeping Gateway running 24/7 (shutdown ignored)'));
+  // One lightweight server-side keep-alive loop, started exactly once alongside
+  // the server. It pings this gateway's own /ping on loopback every 3 minutes
+  // while the process is alive (see keepAlive.ts for why it cannot wake a Render
+  // container that Render has already suspended).
+  const keepAlive = startKeepAlive(config.PORT);
+
+  const onSignal = (signal: string): void => {
+    logger.info(`${signal} received — keeping Gateway running 24/7 (shutdown ignored)`);
+    // Clear the timers so a graceful teardown path never leaks the loop.
+    keepAlive.stop();
+  };
+
+  process.on('SIGTERM', () => onSignal('SIGTERM'));
+  process.on('SIGINT', () => onSignal('SIGINT'));
 };
 
 start().catch((err: unknown) => {

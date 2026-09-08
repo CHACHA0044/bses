@@ -48,6 +48,21 @@ const documentEnvSchema = baseEnvSchema.extend({
   OCR_PDF_MAX_PAGES: z.coerce.number().int().min(1).max(100).default(25),
   /** Max long-edge (px) when rasterizing scanned PDF pages. */
   OCR_PDF_RENDER_DIMENSION: z.coerce.number().int().min(500).max(2000).default(1500),
+
+  // ── Secondary OCR / quality gate (Phase: layered pipeline) ───────────────
+  /** Below this primary-OCR confidence the secondary OCR fallback may run. */
+  OCR_SECONDARY_THRESHOLD: z.coerce.number().int().min(0).max(100).default(60),
+  /** Enable the PaddleOCR sidecar (see services/ocr-sidecar). */
+  OCR_PADDLE_ENABLED: z
+    .string()
+    .default('false')
+    .transform((v) => v === 'true' || v === '1'),
+  /** Base URL of the PaddleOCR sidecar (internal loopback recommended). */
+  OCR_PADDLE_URL: z.string().url().default('http://127.0.0.1:3014'),
+  /** Abort timeout for secondary OCR calls. */
+  OCR_PADDLE_TIMEOUT_MS: z.coerce.number().int().positive().default(15000),
+  /** Below this image-quality score a document is auto-flagged NEEDS_REVIEW. */
+  OCR_QUALITY_GATE: z.coerce.number().min(0).max(1).default(0.35),
 });
 
 export const config = createConfig(documentEnvSchema);
