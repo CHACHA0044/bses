@@ -111,6 +111,69 @@ function WelcomeBanner({
   );
 }
 
+/**
+ * Build an accurate, user-friendly dashboard error message.
+ *
+ * Distinguishes three cases instead of always blaming the database:
+ *   - A server-side (5xx / proxy-502) failure, reported by the backend
+ *   - A network / timeout failure (no response from the backend at all)
+ *   - A generic failure (e.g. 4xx) where we shouldn't guess the cause
+ *
+ * Only when the backend explicitly reports a database problem do we surface a
+ * "database unavailable" message to the user.
+ */
+function buildDashboardErrorMessage(error: unknown): { title: string; detail: string } {
+  const status =
+    typeof error === 'object' && error !== null && 'status' in error
+      ? (error as { status?: unknown }).status
+      : undefined;
+  const message =
+    typeof error === 'object' && error !== null && 'message' in error
+      ? String((error as { message?: unknown }).message ?? '')
+      : '';
+  const lowered = `${message}`.toLowerCase();
+
+  const isNetwork =
+    status === undefined &&
+    (/failed to fetch/i.test(lowered) ||
+      /network/i.test(lowered) ||
+      /timed? ?out/i.test(lowered) ||
+      /econnrefused/i.test(lowered) ||
+      /enotfound/i.test(lowered));
+
+  const isServer =
+    typeof status === 'number'
+      ? status >= 500
+      : /50[0-9]/i.test(lowered) || /5[0-9]{2}/i.test(lowered);
+
+  // The backend surfaced a database error explicitly.
+  if (/database|db error|postgres|prisma/i.test(lowered)) {
+    return {
+      title: 'Unable to load dashboard',
+      detail: 'The database is temporarily unavailable. This is a temporary issue — please retry in a moment.',
+    };
+  }
+
+  if (isServer) {
+    return {
+      title: 'Unable to load dashboard',
+      detail: 'The server ran into a temporary problem while loading your dashboard. Please retry in a moment.',
+    };
+  }
+
+  if (isNetwork) {
+    return {
+      title: 'Unable to load dashboard',
+      detail: 'Your device could not reach the server, or the request timed out. Check your connection and try again.',
+    };
+  }
+
+  return {
+    title: 'Unable to load dashboard',
+    detail: 'Something went wrong while loading your dashboard. Please try again.',
+  };
+}
+
 export function DashboardView({ initialData }: { initialData?: DashboardPayload }) {
   const { user } = useAuthStore();
 
@@ -118,7 +181,7 @@ export function DashboardView({ initialData }: { initialData?: DashboardPayload 
   // skeleton, no network); SWR revalidates quietly in the background after
   // the fresh window. On later client navigations the idle PrefetchProvider
   // has already warmed this URL into the shared cache.
-  const { data, loading, error, revalidate } = useApiResource<DashboardPayload>(
+  const { data, loading, error, isValidating, revalidate } = useApiResource<DashboardPayload>(
     '/users/dashboard',
     {
       initialData,
@@ -154,6 +217,8 @@ export function DashboardView({ initialData }: { initialData?: DashboardPayload 
   }
 
   if (error || forceError) {
+    const retrying = isValidating;
+    const { title, detail } = buildDashboardErrorMessage(error);
     return (
       <div className="space-y-8 p-2 max-w-7xl mx-auto">
         <WelcomeBanner
@@ -163,20 +228,20 @@ export function DashboardView({ initialData }: { initialData?: DashboardPayload 
         />
         <div className="rounded-2xl border border-red-200 bg-red-50 p-6 text-center shadow-sm">
           <AlertCircle className="w-10 h-10 text-red-500 mx-auto mb-3" />
-          <p className="text-red-700 font-extrabold mb-2">Unable to load dashboard</p>
-          <p className="text-red-500 text-sm mb-4 max-w-md mx-auto">
-            The server is taking too long to respond. This usually means the database is temporarily
-            unavailable. Your login was successful — please retry in a moment.
-          </p>
+          <p className="text-red-700 font-extrabold mb-2">{title}</p>
+          <p className="text-red-500 text-sm mb-4 max-w-md mx-auto">{detail}</p>
           <Button
             variant="danger"
             size="sm"
+            isLoading={retrying}
+            loadingLabel="Retrying..."
+            disabled={retrying}
             onClick={() => {
               setForceError(false);
               void revalidate();
             }}
           >
-            Retry
+            {retrying ? 'Retrying...' : 'Retry'}
           </Button>
         </div>
       </div>
