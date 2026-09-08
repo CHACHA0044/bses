@@ -30,6 +30,10 @@ import {
   SUCCESS_STATUSES,
 } from '../config/connectionWorkflow';
 import { assessDocumentCompleteness } from '../config/requiredDocuments';
+import {
+  assessCrossDocumentConsistency,
+  CrossDocumentRecord,
+} from '../config/crossDocumentValidation';
 const logger = createLogger({ service: 'consumer-workflow' });
 
 export interface Actor {
@@ -90,6 +94,36 @@ export class WorkflowService {
       ? encryptionService.decrypt(connection.user.mobileEncrypted)
       : null;
     if (mobile) await notify(mobile, connection.user?.id);
+  }
+
+  /** Decrypts an identity field, tolerating empty/malformed ciphertext. */
+  private decryptField(value: unknown): string | null {
+    if (!value || typeof value !== 'string' || value.length === 0) return null;
+    try {
+      const decrypted = encryptionService.decrypt(value);
+      return decrypted && decrypted.trim().length > 0 ? decrypted : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Builds the cross-document identity records from raw DB documents (their
+   * OCR identity fields are encrypted at rest). Fields the current consumer is
+   * allowed to see are decrypted; anything that fails to decrypt becomes null
+   * so a single bad field can never crash the workflow gate.
+   */
+  private buildCrossDocumentRecords(documents: any[] | undefined): CrossDocumentRecord[] {
+    return (documents ?? []).map((d) => ({
+      documentId: d.id,
+      documentType: d.documentType,
+      documentName: d.documentName ?? 'document',
+      isUnreadable: d.isUnreadable,
+      needsReview: d.needsReview,
+      name: this.decryptField(d.extractedNameEncrypted),
+      fatherName: this.decryptField(d.extractedFatherNameEncrypted),
+      dob: this.decryptField(d.extractedDobEncrypted),
+    }));
   }
 
   /**
@@ -169,10 +203,20 @@ export class WorkflowService {
       connection.connectionType,
     );
 
-    if (!assessment.complete) {
+    // Cross-document identity consistency: when the application carries more
+    // than one readable identity document (Aadhaar / PAN / DL), their
+    // Name / Father Name / DOB must agree. A conflict (e.g. Aadhaar resolves
+    // to one person and PAN to another) is a genuine fraud/identity signal —
+    // the submission is held for review instead of silently advancing.
+    const crossDocument = assessCrossDocumentConsistency(
+      this.buildCrossDocumentRecords(connection.documents ?? []),
+    );
+
+    if (!assessment.complete || !crossDocument.complete) {
+      const heldIssues = [...assessment.issues, ...crossDocument.issues];
       const notes =
-        assessment.issues.length > 0
-          ? `Submission held — document verification pending: ${assessment.issues.join('; ').slice(0, 500)}`
+        heldIssues.length > 0
+          ? `Submission held — document verification pending: ${heldIssues.join('; ').slice(0, 500)}`
           : 'Submission held — document verification pending';
 
       const { connection: updated } = await this.transition({
@@ -183,7 +227,11 @@ export class WorkflowService {
         ipAddress,
         auditAction: AuditAction.WORKFLOW_TRANSITION,
         notes,
-        metadata: { autoHeld: true, documentIssues: assessment.issues },
+        metadata: {
+          autoHeld: true,
+          documentIssues: assessment.issues,
+          ...(crossDocument.issues.length > 0 && { crossDocumentIssues: crossDocument.issues }),
+        },
         ...(comment !== undefined && { comment }),
         ...(requestId !== undefined && { requestId }),
       });
@@ -630,10 +678,24 @@ export class WorkflowService {
       documents = [];
     }
 
+    // Cross-document identity consistency, surfaced for the review UI. The
+    // consumer-safe `issues` (no raw field values) are always included; the
+    // structured conflicts (decrypted values) only for officers/admins and the
+    // owning consumer, mirroring the document sensitivity rule above.
+    const crossDocument = assessCrossDocumentConsistency(
+      this.buildCrossDocumentRecords(connection.documents ?? []),
+    );
+
     return {
       ...connection,
       user,
       documents,
+      crossDocument: {
+        complete: crossDocument.complete,
+        issues: crossDocument.issues,
+        conflicts:
+          actor.role !== 'CONSUMER' || isOwnApplication ? crossDocument.conflicts : [],
+      },
       timeline,
       allowedTransitions,
       stage: this.getStageInfo(connection.status),
