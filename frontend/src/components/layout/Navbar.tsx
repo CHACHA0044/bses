@@ -225,7 +225,7 @@ export const Navbar: React.FC = () => {
                  The New Registration CTA is intentionally kept here because
                  registration is the primary conversion goal of the marketing
                  site. */
-              <div className="flex items-center gap-2">
+              <div className="hidden md:flex items-center gap-2">
                 {pathname !== '/register' && (
                   <Link href="/register" prefetch={true}>
                     <Button variant="cta" size="sm">
@@ -411,30 +411,6 @@ export const Navbar: React.FC = () => {
                       <span className="flex items-center gap-3 text-base">
                         <LogIn className="h-4 w-4 shrink-0 text-slate-400" aria-hidden="true" />
                         Login
-                      </span>
-                      <ChevronRight
-                        className="h-4 w-4 shrink-0 text-slate-300"
-                        aria-hidden="true"
-                      />
-                    </Link>
-                  )}
-                  {pathname !== '/register' && (
-                    <Link
-                      href="/register"
-                      prefetch={true}
-                      onClick={closeMenu}
-                      className={[
-                        navItemBase,
-                        'justify-between w-full rounded-xl px-4 py-3.5 min-h-[48px]',
-                        pathname === '/register'
-                          ? 'bg-primary/10 text-primary font-bold border border-primary/20'
-                          : 'text-slate-800 hover:bg-slate-100 hover:text-primary',
-                      ].join(' ')}
-                      aria-current={pathname === '/register' ? 'page' : undefined}
-                    >
-                      <span className="flex items-center gap-3 text-base">
-                        <FilePlus className="h-4 w-4 shrink-0 text-slate-400" aria-hidden="true" />
-                        New Registration
                       </span>
                       <ChevronRight
                         className="h-4 w-4 shrink-0 text-slate-300"

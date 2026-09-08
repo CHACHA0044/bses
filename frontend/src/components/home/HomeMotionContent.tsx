@@ -145,11 +145,6 @@ export default function HomeMotionContent() {
             transition={{ duration: 0.5, ease: 'easeOut' }}
             className="lg:col-span-7 space-y-6 text-center lg:text-left"
           >
-            <span className="inline-flex items-center gap-2 rounded-full border border-amber-400/30 bg-amber-500/15 px-4 py-1.5 text-xs font-bold text-amber-300">
-              <Zap className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />
-              Unofficial BSES Delhi Discom Portal — BRPL &amp; BYPL
-            </span>
-
             <h1 className="font-heading text-4xl sm:text-5xl lg:text-6xl font-extrabold tracking-tight text-white leading-[1.1]">
               BSES Consumer<br />
               <span className="text-amber-400">Connection Portal</span>
@@ -159,20 +154,21 @@ export default function HomeMotionContent() {
               Apply for new electricity connections, upload verified PII documents under DPDP Act 2023, and track applications with real-time SMS &amp; WhatsApp alerts.
             </p>
 
-            <div className="flex flex-wrap items-center justify-center gap-3 pt-2 lg:justify-start">
-              <Link href="/register">
-                <Button variant="cta" size="lg" leftIcon={<UserPlus className="h-5 w-5" />}>
-                  Register as Consumer
+            <div className="flex flex-col items-center justify-center gap-3 pt-2 sm:flex-row lg:justify-start">
+              <Link href="/register" className="w-full sm:w-auto">
+                <Button variant="cta" size="lg" leftIcon={<UserPlus className="h-5 w-5" />} fullWidth className="sm:w-auto">
+                  Register
                 </Button>
               </Link>
-              <Link href="/login">
+              <Link href="/login" className="w-full sm:w-auto">
                 <Button
                   variant="secondary"
                   size="lg"
-                  className="!bg-white/10 !text-white !border-white/30 hover:!bg-white/20"
+                  className="!bg-white/10 !text-white !border-white/30 hover:!bg-white/20 sm:w-auto"
                   leftIcon={<LogIn className="h-5 w-5" />}
+                  fullWidth
                 >
-                  Consumer Login
+                  Login
                 </Button>
               </Link>
             </div>
