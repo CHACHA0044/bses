@@ -3,7 +3,6 @@
 import React, { useState } from 'react';
 import Link from 'next/link';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import {
   Zap,
@@ -11,7 +10,6 @@ import {
   FileCheck,
   ArrowRight,
   UserPlus,
-  LogIn,
   Phone,
   ChevronDown,
   FileText,
@@ -153,24 +151,6 @@ export default function HomeMotionContent() {
             <p className="max-w-xl text-slate-300 text-base leading-relaxed mx-auto lg:mx-0">
               Apply for new electricity connections, upload verified PII documents under DPDP Act 2023, and track applications with real-time SMS &amp; WhatsApp alerts.
             </p>
-
-            <div className="flex items-center justify-center gap-3 pt-2 lg:justify-start">
-              <Link href="/register">
-                <Button variant="cta" size="md" leftIcon={<UserPlus className="h-4 w-4" />} className="lg:size-lg lg:[&>svg]:h-5 lg:[&>svg]:w-5">
-                  Register
-                </Button>
-              </Link>
-              <Link href="/login">
-                <Button
-                  variant="secondary"
-                  size="md"
-                  className="!bg-white/10 !text-white !border-white/30 hover:!bg-white/20 lg:size-lg lg:[&>svg]:h-5 lg:[&>svg]:w-5"
-                  leftIcon={<LogIn className="h-4 w-4" />}
-                >
-                  Login
-                </Button>
-              </Link>
-            </div>
           </motion.div>
 
           {/* Right — Quick Action Desk */}
