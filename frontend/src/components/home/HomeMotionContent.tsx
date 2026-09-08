@@ -154,19 +154,18 @@ export default function HomeMotionContent() {
               Apply for new electricity connections, upload verified PII documents under DPDP Act 2023, and track applications with real-time SMS &amp; WhatsApp alerts.
             </p>
 
-            <div className="flex flex-col items-center justify-center gap-3 pt-2 sm:flex-row lg:justify-start">
-              <Link href="/register" className="w-full sm:w-auto">
-                <Button variant="cta" size="lg" leftIcon={<UserPlus className="h-5 w-5" />} fullWidth className="sm:w-auto">
+            <div className="flex items-center justify-center gap-3 pt-2 lg:justify-start">
+              <Link href="/register">
+                <Button variant="cta" size="md" leftIcon={<UserPlus className="h-4 w-4" />} className="lg:size-lg lg:[&>svg]:h-5 lg:[&>svg]:w-5">
                   Register
                 </Button>
               </Link>
-              <Link href="/login" className="w-full sm:w-auto">
+              <Link href="/login">
                 <Button
                   variant="secondary"
-                  size="lg"
-                  className="!bg-white/10 !text-white !border-white/30 hover:!bg-white/20 sm:w-auto"
-                  leftIcon={<LogIn className="h-5 w-5" />}
-                  fullWidth
+                  size="md"
+                  className="!bg-white/10 !text-white !border-white/30 hover:!bg-white/20 lg:size-lg lg:[&>svg]:h-5 lg:[&>svg]:w-5"
+                  leftIcon={<LogIn className="h-4 w-4" />}
                 >
                   Login
                 </Button>
