@@ -47,11 +47,11 @@ export class AdminService {
       // Only fetches date buckets with counts, not individual user rows.
       const registrationBucketQuery = this.prisma.$queryRaw<Array<{ bucket: Date; count: bigint }>>`
         SELECT
-          date_trunc('day', "createdAt")::date                     AS bucket,
-          COUNT(*)::int::bigint                                     AS count
-        FROM "User"
-        WHERE "createdAt" >= ${sixMonthsAgo}
-        GROUP BY date_trunc('day', "createdAt")::date
+          date_trunc('day', "created_at")::date               AS bucket,
+          COUNT(*)::int::bigint                               AS count
+        FROM "users"
+        WHERE "created_at" >= ${sixMonthsAgo}
+        GROUP BY date_trunc('day', "created_at")::date
         ORDER BY bucket ASC
       `;
 

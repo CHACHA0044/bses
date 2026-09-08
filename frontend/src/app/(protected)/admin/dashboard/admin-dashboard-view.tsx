@@ -131,7 +131,12 @@ export function AdminDashboardView() {
             Live snapshot of consumers and connection applications.
           </p>
         </div>
-        <ApiErrorBanner error={error} onRetry={revalidate} title="Could not load dashboard data" />
+        <ApiErrorBanner
+          error={error}
+          onRetry={revalidate}
+          retrying={isValidating}
+          title="Could not load dashboard data"
+        />
       </div>
     );
   }

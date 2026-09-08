@@ -8,6 +8,8 @@ interface ApiErrorBannerProps {
   error: unknown;
   onRetry?: () => void;
   title?: string;
+  /** True while a retry request is in flight — disables the button + shows "Retrying...". */
+  retrying?: boolean;
 }
 
 /** Extracts a human-readable message from an unknown error object. */
@@ -30,7 +32,7 @@ function extractMessage(err: unknown): string {
  * Handles 502/503/504 (upstream proxy errors), 401 (auth), 500 (server), etc.
  * Does NOT catch 400 client errors — those are shown via field-level validation.
  */
-export function ApiErrorBanner({ error, onRetry, title }: ApiErrorBannerProps) {
+export function ApiErrorBanner({ error, onRetry, title, retrying = false }: ApiErrorBannerProps) {
   if (!error) return null;
 
   const message = extractMessage(error);
@@ -70,6 +72,9 @@ export function ApiErrorBanner({ error, onRetry, title }: ApiErrorBannerProps) {
             variant="outline"
             size="sm"
             onClick={onRetry}
+            disabled={retrying}
+            isLoading={retrying}
+            loadingLabel="Retrying..."
             className="border-red-300 text-red-700 hover:bg-red-100"
           >
             <RefreshCw className="w-3.5 h-3.5" />
