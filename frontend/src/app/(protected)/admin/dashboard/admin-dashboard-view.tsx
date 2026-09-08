@@ -142,19 +142,19 @@ export function AdminDashboardView() {
   }
 
   return (
-    <div className="max-w-7xl mx-auto space-y-8 p-2">
+    <div className="max-w-7xl mx-auto space-y-6 sm:space-y-8 p-2">
       <div>
         <div className="inline-flex items-center gap-2 rounded-full bg-slate-900 px-3 py-1 text-xs font-semibold text-amber-400 mb-2">
           <Shield className="w-3.5 h-3.5" />
           <span>BSES Administration Portal</span>
         </div>
-        <h1 className="text-2xl font-bold text-slate-900">Executive Overview & Analytics</h1>
+        <h1 className="text-xl sm:text-2xl font-bold text-slate-900">Executive Overview & Analytics</h1>
         <p className="text-xs text-slate-500 mt-1">
           Live snapshot of consumers and connection applications.
         </p>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 gap-3 sm:gap-4">
         {stats.map((stat) => (
           <StatCard
             key={stat.label}
@@ -169,10 +169,10 @@ export function AdminDashboardView() {
       </div>
 
       {/* Analytics Charts Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
         {/* Chart 1: Monthly Consumer Registrations */}
-        <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
-          <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+        <div className="bg-white p-4 sm:p-6 rounded-2xl border border-slate-200 shadow-sm space-y-3 sm:space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3">
             <div>
               <h2 className="text-base font-bold text-slate-900">Monthly Registrations</h2>
               <p className="text-xs text-slate-500">
@@ -195,8 +195,8 @@ export function AdminDashboardView() {
         </div>
 
         {/* Chart 2: Daily Consumer Registrations */}
-        <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
-          <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+        <div className="bg-white p-4 sm:p-6 rounded-2xl border border-slate-200 shadow-sm space-y-3 sm:space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3">
             <div>
               <h2 className="text-base font-bold text-slate-900">Daily Registrations Trend</h2>
               <p className="text-xs text-slate-500">Daily registration activity (Past 14 Days)</p>
@@ -214,15 +214,15 @@ export function AdminDashboardView() {
             barClassName="bg-emerald-500"
             barHoverClassName="group-hover:bg-emerald-400"
             barMinHeight={4}
-            className="gap-1 px-1"
+            className="gap-1 px-1 sm:gap-1.5"
             labelClassName="text-[9px] text-slate-400"
             valueClassName="text-[9px]"
           />
         </div>
 
         {/* Chart 3: Gender Distribution */}
-        <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
-          <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+        <div className="bg-white p-4 sm:p-6 rounded-2xl border border-slate-200 shadow-sm space-y-3 sm:space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3">
             <div>
               <h2 className="text-base font-bold text-slate-900">Gender Demographics</h2>
               <p className="text-xs text-slate-500">Distribution of registered consumer accounts</p>
@@ -278,19 +278,19 @@ export function AdminDashboardView() {
                   })}
                 </div>
 
-                <div className="grid grid-cols-2 gap-3 text-xs">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3 text-xs">
                   {items.map((it) => {
                     const pct = total > 0 ? Math.round((it.count / total) * 100) : 0;
                     return (
                       <div
                         key={it.label}
-                        className="p-3 bg-slate-50 rounded-xl border border-slate-100 flex items-center justify-between"
+                        className="p-3 bg-slate-50 rounded-xl border border-slate-100 flex items-center justify-between gap-2"
                       >
-                        <div className="flex items-center gap-2">
-                          <span className={`w-3 h-3 rounded-full ${it.color}`} />
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className={`w-3 h-3 rounded-full shrink-0 ${it.color}`} />
                           <span className="font-semibold text-slate-700">{it.label}</span>
                         </div>
-                        <span className="font-bold text-slate-900">
+                        <span className="font-bold text-slate-900 whitespace-nowrap">
                           {it.count} ({pct}%)
                         </span>
                       </div>
@@ -303,8 +303,8 @@ export function AdminDashboardView() {
         </div>
 
         {/* Chart 4: Connection Request Trends */}
-        <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
-          <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+        <div className="bg-white p-4 sm:p-6 rounded-2xl border border-slate-200 shadow-sm space-y-3 sm:space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3">
             <div>
               <h2 className="text-base font-bold text-slate-900">Connection Request Trends</h2>
               <p className="text-xs text-slate-500">Applications breakdown by supply category</p>
@@ -329,10 +329,10 @@ export function AdminDashboardView() {
                   const pct = total > 0 ? Math.round((count / total) * 100) : 0;
 
                   return (
-                    <div key={cat.key} className="space-y-1">
-                      <div className="flex items-center justify-between text-xs">
-                        <span className="font-semibold text-slate-700">{cat.label}</span>
-                        <span className="font-bold text-slate-900">
+                    <div key={cat.key} className="space-y-1.5">
+                      <div className="flex items-center justify-between gap-2 text-xs">
+                        <span className="font-semibold text-slate-700 min-w-0">{cat.label}</span>
+                        <span className="font-bold text-slate-900 shrink-0 whitespace-nowrap">
                           {count} app(s) ({pct}%)
                         </span>
                       </div>
@@ -351,14 +351,14 @@ export function AdminDashboardView() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
         <Link
           href="/admin/users"
-          className="group bg-white p-6 rounded-2xl border border-slate-200 shadow-sm hover:border-amber-500 hover:shadow-md active:scale-[0.98] transition-all duration-150 space-y-2"
+          className="group bg-white p-4 sm:p-6 rounded-2xl border border-slate-200 shadow-sm hover:border-amber-500 hover:shadow-md active:scale-[0.98] transition-all duration-150 space-y-2"
         >
-          <div className="flex items-center justify-between">
-            <h2 className="text-lg font-bold text-slate-900">Registered Consumer Directory</h2>
-            <ArrowRight className="w-5 h-5 text-slate-400 group-hover:text-amber-500 group-hover:translate-x-0.5 transition-all" />
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="text-base sm:text-lg font-bold text-slate-900">Registered Consumer Directory</h2>
+            <ArrowRight className="w-5 h-5 text-slate-400 group-hover:text-amber-500 group-hover:translate-x-0.5 transition-all shrink-0" />
           </div>
           <p className="text-xs text-slate-500">
             View, search, filter, and inspect registered consumers.
@@ -367,11 +367,11 @@ export function AdminDashboardView() {
 
         <Link
           href="/admin/connections"
-          className="group bg-white p-6 rounded-2xl border border-slate-200 shadow-sm hover:border-amber-500 hover:shadow-md active:scale-[0.98] transition-all duration-150 space-y-2"
+          className="group bg-white p-4 sm:p-6 rounded-2xl border border-slate-200 shadow-sm hover:border-amber-500 hover:shadow-md active:scale-[0.98] transition-all duration-150 space-y-2"
         >
-          <div className="flex items-center justify-between">
-            <h2 className="text-lg font-bold text-slate-900">Review Connection Requests</h2>
-            <ArrowRight className="w-5 h-5 text-slate-400 group-hover:text-amber-500 group-hover:translate-x-0.5 transition-all" />
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="text-base sm:text-lg font-bold text-slate-900">Review Connection Requests</h2>
+            <ArrowRight className="w-5 h-5 text-slate-400 group-hover:text-amber-500 group-hover:translate-x-0.5 transition-all shrink-0" />
           </div>
           <p className="text-xs text-slate-500">
             Approve, reject, or request additional documents for applications.

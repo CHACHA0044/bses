@@ -32,32 +32,42 @@ export const StatCard: React.FC<StatCardProps> = ({
     <Link href={href} className="group block h-full outline-none cursor-pointer">
       <div
         className={[
-          'bg-white p-5 rounded-2xl border border-slate-200 shadow-sm',
+          'bg-white rounded-2xl border border-slate-200 shadow-sm',
           'flex items-center justify-between h-full',
           'transition-all duration-150 ease-out',
           'group-hover:-translate-y-0.5 group-hover:shadow-md active:scale-[0.97]',
-          lg ? 'group-hover:border-amber-500' : 'group-hover:border-slate-300',
+          lg
+            ? 'p-4 sm:p-5 gap-3 group-hover:border-amber-500'
+            : 'p-5 group-hover:border-slate-300',
         ].join(' ')}
       >
         <div className="min-w-0">
           <p
             className={[
-              'font-semibold text-slate-500 truncate',
-              lg ? 'text-xs uppercase tracking-wide text-slate-400' : 'text-xs',
+              'font-semibold text-slate-500',
+              lg
+                ? 'text-[10px] sm:text-xs uppercase tracking-wide text-slate-400 leading-snug'
+                : 'text-xs truncate',
             ].join(' ')}
           >
             {label}
           </p>
-          <p className={`font-extrabold text-slate-900 mt-1 ${lg ? 'text-3xl' : 'text-2xl'}`}>{value}</p>
+          <p
+            className={`font-extrabold text-slate-900 mt-1 leading-none ${
+              lg ? 'text-2xl sm:text-3xl' : 'text-2xl'
+            }`}
+          >
+            {value}
+          </p>
         </div>
         <div
           className={[
             'shrink-0 flex items-center justify-center',
-            lg ? 'w-12 h-12 rounded-xl' : 'w-11 h-11 rounded-2xl',
+            lg ? 'w-11 h-11 sm:w-12 sm:h-12 rounded-xl' : 'w-11 h-11 rounded-2xl',
             iconWrap,
           ].join(' ')}
         >
-          <Icon className={lg ? 'w-6 h-6' : 'w-5 h-5'} />
+          <Icon className={lg ? 'w-5 h-5 sm:w-6 sm:h-6' : 'w-5 h-5'} />
         </div>
       </div>
     </Link>

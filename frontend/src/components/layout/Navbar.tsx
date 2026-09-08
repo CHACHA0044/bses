@@ -28,6 +28,7 @@ import {
   LogIn,
   Loader2,
 } from 'lucide-react';
+import { adminNavItems, isAdminRole, isNavActive } from '@/lib/navigation';
 
 /* ── Public nav (unauthenticated only) ─────────────────────────── */
 const publicNavLinks = [
@@ -60,8 +61,8 @@ export const Navbar: React.FC = () => {
   const pathname = usePathname();
   const router = useRouter();
   const { user, isAuthenticated, isLoading, isLoadingLogout, logout } = useAuth();
-  const dashHref =
-    user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN' ? '/admin/dashboard' : '/dashboard';
+  const isAdmin = isAdminRole(user?.role);
+  const dashHref = isAdmin ? '/admin/dashboard' : '/dashboard';
 
   // Mobile drawer states
   const [menuOpen, setMenuOpen] = useState(false);
@@ -125,7 +126,14 @@ export const Navbar: React.FC = () => {
     return 'U';
   })();
 
-  const mobileNavItems = isAuthenticated ? buildMobileNav(pathname, dashHref) : [];
+  // Admin users get their own portal menu (matching the desktop admin sidebar);
+  // consumer users keep the existing consumer mobile nav (current page hidden,
+  // Dashboard prepended when not already on it).
+  const mobileNavItems = isAuthenticated
+    ? isAdmin
+      ? adminNavItems
+      : buildMobileNav(pathname, dashHref)
+    : [];
 
   return (
     <>
@@ -309,9 +317,17 @@ export const Navbar: React.FC = () => {
             <div className="px-4 py-3 space-y-1">
               {isAuthenticated ? (
                 <>
+                  {isAdmin && (
+                    <div className="px-2 pt-1 pb-1 text-[11px] font-bold uppercase tracking-widest text-slate-400">
+                      Administration Portal
+                    </div>
+                  )}
                   {mobileNavItems.map((item) => {
                     const Icon = item.icon;
-                    const isActive = pathname === item.href;
+                    // Admin items carry route patterns (activeOn) so nested admin
+                    // routes highlight their parent section; consumer items keep
+                    // the existing exact-match highlight.
+                    const isActive = 'activeOn' in item ? isNavActive(item, pathname) : pathname === item.href;
                     return (
                       <Link
                         key={item.href}
