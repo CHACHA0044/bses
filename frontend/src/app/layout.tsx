@@ -22,6 +22,20 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   return (
     <html lang="en" className={`${fontInter.variable} ${fontRoboto.variable}`}>
       <body className="min-h-screen bg-slate-50 font-sans antialiased text-slate-900">
+        {/*
+          Anti-FOUC scroll guard — runs before the first paint so every page
+          load starts at the very top:
+           1. Disable the browser's automatic scroll restoration, so a reload or
+              back/forward navigation can never land mid-page.
+           2. Force scrollTop = 0 on every scrollable element. On a fresh load
+              this is a no-op; on a reload mid-page it resets to the top BEFORE
+              the first paint — no visible jump.
+        */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `(function(){try{if(typeof history!=='undefined'&&'scrollRestoration' in history){history.scrollRestoration='manual';}}catch(e){}try{window.scrollTo(0,0);document.documentElement.scrollTop=0;document.body.scrollTop=0;}catch(e){}})();`,
+          }}
+        />
         <SessionProvider initialSession={session}>
           <ScrollToTop />
           <React.Suspense fallback={null}>

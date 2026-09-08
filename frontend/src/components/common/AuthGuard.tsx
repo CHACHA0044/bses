@@ -33,7 +33,7 @@ export const AuthGuard: React.FC<AuthGuardProps> = ({
   allowRoles,
   fallbackHref,
 }) => {
-  const { user, isAuthenticated, isLoading } = useAuth();
+  const { user, isAuthenticated, isLoading, isLoadingLogout } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
 
@@ -46,16 +46,19 @@ export const AuthGuard: React.FC<AuthGuardProps> = ({
   // session check hasn't settled within 8s (network hang, gateway down, store
   // regression), bounce to /login with a `next` return path.
   useEffect(() => {
-    if (!isLoading) return;
+    if (!isLoading || isLoadingLogout) return;
     const timer = setTimeout(() => {
       const next = pathname ? `?next=${encodeURIComponent(pathname)}` : '';
       router.replace(`/login${next}`);
     }, 8000);
     return () => clearTimeout(timer);
-  }, [isLoading, pathname, router]);
+  }, [isLoading, isLoadingLogout, pathname, router]);
 
   useEffect(() => {
-    if (isLoading) return;
+    // Never hijack an in-progress logout: the logout flow performs its own
+    // navigation to the landing page. Redirecting here would both blank the
+    // screen and send the user to /login instead of Home.
+    if (isLoading || isLoadingLogout) return;
 
     if (!isAuthenticated) {
       const next = pathname ? `?next=${encodeURIComponent(pathname)}` : '';
@@ -70,7 +73,7 @@ export const AuthGuard: React.FC<AuthGuardProps> = ({
           : fallbackHref ?? '/dashboard';
       router.replace(dest);
     }
-  }, [isLoading, isAuthenticated, user, allowed, pathname, router, fallbackHref]);
+  }, [isLoading, isLoadingLogout, isAuthenticated, user, allowed, pathname, router, fallbackHref]);
 
   if (isLoading) {
     return (
@@ -81,7 +84,13 @@ export const AuthGuard: React.FC<AuthGuardProps> = ({
     );
   }
 
-  if (!isAuthenticated) return null;
+  // While a logout is in flight, keep the current page mounted so the
+  // navigation to the landing page is seamless (no blank/white flash). The
+  // AuthGuard unmounts naturally when the protected layout is replaced by the
+  // public landing page.
+  if (!isAuthenticated) {
+    return isLoadingLogout ? <>{children}</> : null;
+  }
 
   if (allowed && user && !allowed.includes(user.role as AllowedRole)) return null;
 

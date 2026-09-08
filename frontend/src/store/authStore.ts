@@ -26,7 +26,7 @@ interface AuthState {
   setUser: (user: UserProfile | null) => void;
   setCachedUser: (user: UserProfile | null) => void;
   checkSession: (silent?: boolean) => Promise<void>;
-  logout: (router?: { push: (href: string) => void }) => Promise<void>;
+  logout: (router?: { replace?: (href: string) => void }) => Promise<void>;
   resetLogoutState: () => void;
 }
 
@@ -120,11 +120,18 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   /**
    * Logout — guarded against double submissions.
    *
-   * The `isLoadingLogout` flag is set BEFORE the request is sent and is only
-   * cleared in the `finally` block. Any second click while the first request is
-   * pending is a no-op: the store-level guard short-circuits immediately so the
-   * API is never hit twice. If the request fails, the flag is cleared and the
-   * button returns to a normal clickable state so the user can retry.
+   * The `isLoadingLogout` flag is set BEFORE the request is sent and stays set
+   * through the navigation to the landing page so the AuthGuard keeps the
+   * current page mounted (no blank/white flash) and never hijacks the redirect
+   * to /login. Any second click while the flow is in progress is a no-op: the
+   * store-level guard short-circuits immediately so the API is never hit twice.
+   * If the request fails the error is surfaced, but the local session is still
+   * cleared and the user still lands on Home — a fresh login re-seeds the
+   * store and resets the flag.
+   *
+   * After a successful logout the user is always sent to the Home/Landing page
+   * (not the login page). The landing page mounts a small ResetLogoutState
+   * component that resets `isLoadingLogout` back to false.
    */
   logout: async (router) => {
     if (get().isLoadingLogout) return;
@@ -138,11 +145,14 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       if (typeof window !== 'undefined') {
         try { sessionStorage.clear(); } catch {}
       }
-      set({ user: null, isAuthenticated: false, isLoading: false, isLoadingLogout: false, error: null });
-      if (router) {
-        router.push('/login');
+      // Keep isLoadingLogout true while navigating so the AuthGuard keeps the
+      // current page mounted (no white flash). The next setUser()/SessionProvider
+      // seed on the landing page, or resetLogoutState(), resets it.
+      set({ user: null, isAuthenticated: false, isLoading: false, error: null, isLoadingLogout: true });
+      if (router?.replace) {
+        router.replace('/');
       } else if (typeof window !== 'undefined') {
-        window.location.href = '/login';
+        window.location.href = '/';
       }
     }
   },
