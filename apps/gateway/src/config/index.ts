@@ -12,6 +12,10 @@ const gatewayEnvSchema = baseEnvSchema.extend({
     .string()
     .default('http://localhost:3001')
     .transform((val) => val.split(',').map((s) => s.trim())),
+  KEEPALIVE_URL: z
+    .string()
+    .url('KEEPALIVE_URL must be a valid URL')
+    .default('http://127.0.0.1:3000/ping'),
 });
 
 export const config = createConfig(gatewayEnvSchema);

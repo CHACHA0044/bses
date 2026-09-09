@@ -42,11 +42,11 @@ const start = async (): Promise<void> => {
     logger.info('Gateway running', { port: config.PORT, env: config.NODE_ENV });
   });
 
-  // One lightweight server-side keep-alive loop, started exactly once alongside
-  // the server. It pings this gateway's own /ping on loopback every 3 minutes
-  // while the process is alive (see keepAlive.ts for why it cannot wake a Render
-  // container that Render has already suspended).
-  const keepAlive = startKeepAlive(config.PORT);
+  // One lightweight keep-alive scheduler, started exactly once alongside the
+  // server. It uses node-cron to hit the PUBLIC Render URL every 3 minutes
+  // (see keepAlive.ts for why it cannot wake a Render container that Render has
+  // already suspended).
+  const keepAlive = startKeepAlive();
 
   const onSignal = (signal: string): void => {
     logger.info(`${signal} received — keeping Gateway running 24/7 (shutdown ignored)`);

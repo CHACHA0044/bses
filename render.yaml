@@ -51,6 +51,8 @@ services:
         sync: false
       - key: FRONTEND_URL
         value: 'https://bses-gateway.vercel.app'
+      - key: KEEPALIVE_URL
+        value: 'https://bses-dyfb.onrender.com/ping'
       - key: NOTIFICATION_SERVICE_URL
         value: 'http://127.0.0.1:3013'
       - key: MONGODB_URI

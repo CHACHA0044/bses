@@ -1,0 +1,717 @@
+Software Requirement Specification (SRS)
+Project Title
+BSES Consumer Registration & Dashboard Management System
+________________________________________
+1. Objective
+Develop a secure, responsive web application that enables prospective and existing electricity consumers to register, authenticate, and manage their electricity service requests through a centralized dashboard.
+The application shall provide:
+•	Secure user registration and authentication 
+•	Online application for a new electricity connection 
+•	User dashboard for tracking requests and profile information 
+•	Administrator dashboard for managing users and connection requests 
+•	Database management of registered consumers and service requests 
+The proposed solution modernizes the existing registration workflow using contemporary web technologies while maintaining compatibility with consumer information and future utility services.
+________________________________________
+2. Technology Stack
+Layer	Technology
+Frontend	Next.js (React)
+Backend	Node.js + Express.js
+Relational Database	PostgreSQL
+Document Repository	MongoDB (GridFS)
+ORM	Prisma ORM
+Authentication	JWT + HTTP Only Cookies
+Password Hashing	bcrypt
+Data Encryption	AES-256 Encryption
+Validation	Zod
+State Management	Zustand
+Styling	Tailwind CSS
+Logging	Winston
+Deployment	Vercel + Render
+________________________________________
+3. Updated System Architecture
+                 User
+
+                  │
+
+         Next.js Frontend
+
+                  │
+
+        REST API (Express.js)
+
+                  │
+
+Authentication & Authorization
+
+                  │
+
+     Business Logic Layer
+
+        │                │
+
+        │                │
+
+ PostgreSQL        Document Service
+
+        │                │
+
+ Prisma ORM     MongoDB GridFS
+
+        │
+
+ Notification Service
+
+ SMS Service
+
+ WhatsApp Service
+________________________________________
+4. Functional Requirements
+4.1 User Registration
+The system shall allow users to register by providing:
+•	First Name 
+•	Middle Name 
+•	Last Name 
+•	Gender 
+•	Email Address 
+•	Mobile Number 
+•	Aadhaar Number (Optional) 
+•	Username 
+•	Password 
+•	Confirm Password 
+•	CA Number (Existing Consumers) 
+•	Meter Number (Existing Consumers) 
+•	CAPTCHA Verification 
+Validation Rules
+•	Mandatory field validation 
+•	Email format validation 
+•	Mobile number validation 
+•	Password strength validation 
+•	Username uniqueness 
+•	CA Number uniqueness (where applicable) 
+•	Meter Number verification (where applicable) 
+•	CAPTCHA verification 
+________________________________________
+4.2 User Login
+Users shall authenticate using:
+•	Username or Email 
+•	Password 
+The backend shall:
+•	Validate credentials 
+•	Compare hashed passwords 
+•	Generate JWT 
+•	Store JWT in HTTP-only cookies 
+•	Redirect authenticated users to the dashboard 
+________________________________________
+4.3 User Dashboard
+After successful login, users shall have access to a personalized dashboard displaying:
+Consumer Information
+•	Consumer Name 
+•	Consumer ID 
+•	CA Number 
+•	Meter Number 
+•	Registered Email 
+•	Mobile Number 
+•	Registration Date 
+•	Account Status 
+Service Requests
+•	New Connection Request Status 
+•	Submitted Applications 
+•	Pending Requests 
+•	Approved Requests 
+Quick Actions
+•	View Profile 
+•	Update Profile 
+•	Change Password 
+•	Apply for New Connection 
+•	Track Connection Request 
+•	View Application History 
+•	Logout 
+________________________________________
+4.4 New Electricity Connection
+The system shall allow users to submit an online application for a new electricity connection.
+Application details include:
+•	Applicant Information 
+•	Property Address 
+•	Identity Details 
+•	Required Load 
+•	Connection Type 
+•	Supporting Documents 
+•	Declaration 
+Users shall be able to:
+•	Submit a new application 
+•	Save draft applications 
+•	Track application status 
+•	View application history 
+Possible request statuses:
+•	Draft 
+•	Submitted 
+•	Under Verification 
+•	Documents Pending 
+•	Approved 
+•	Rejected 
+•	Connection Completed 
+This workflow aligns with BRPL's online new connection service. 
+________________________________________
+4.5 Profile Management
+Users may:
+•	Update Email Address 
+•	Update Mobile Number 
+•	Update Aadhaar Number 
+•	Change Password 
+Restricted fields:
+•	Username 
+•	CA Number 
+•	Meter Number 
+________________________________________
+4.6 Document Management Service (New)
+The system shall provide a secure Document Management Service (DMS) for storing, retrieving, and managing consumer documents.
+Supported documents include:
+•	Aadhaar Card 
+•	PAN Card 
+•	Address Proof 
+•	Ownership Proof 
+•	Passport Size Photograph 
+•	Affidavits 
+•	Other supporting documents 
+The DMS shall provide:
+•	Secure document upload 
+•	Encrypted document storage 
+•	Version management 
+•	Download authorized documents 
+•	Delete documents (when permitted) 
+•	View uploaded documents 
+•	Maintain document metadata 
+•	Link documents to connection requests 
+Only authenticated users and authorized administrators shall be able to access documents.
+________________________________________
+4.7 Notification Service (New)
+The application shall include a notification module supporting:
+SMS Notifications
+Examples:
+•	Registration Successful 
+•	Connection Application Submitted 
+•	Connection Approved 
+•	Password Changed 
+WhatsApp Notifications
+Examples:
+•	Registration Confirmation 
+•	Connection Status Update 
+•	Document Verification Pending 
+During development, the application shall simulate SMS and WhatsApp delivery by displaying success messages.
+________________________________________
+4.8 Admin Dashboard
+Administrators shall be able to:
+•	Login securely 
+•	View all registered consumers 
+•	Search consumers 
+•	Filter consumers 
+•	View connection requests 
+•	Approve or Reject applications 
+•	Update application status 
+•	Edit user information 
+•	Deactivate user accounts 
+•	Export user data 
+________________________________________
+4.9 Dashboard Analytics
+The administrator dashboard shall display:
+Summary Cards
+•	Total Users 
+•	New Registrations 
+•	Active Users 
+•	Pending Connection Requests 
+•	Approved Connections 
+•	Rejected Requests 
+Charts
+•	Monthly Registrations 
+•	Daily Registrations 
+•	Gender Distribution 
+•	Connection Request Trends 
+User Table
+•	User ID 
+•	Name 
+•	Email 
+•	Mobile Number 
+•	CA Number 
+•	Meter Number 
+•	Registration Date 
+•	Account Status 
+•	Connection Status 
+•	Actions 
+________________________________________
+5. Non-Functional Requirements
+Performance
+•	Average API response time below 300 ms 
+•	Login response within 2 seconds 
+•	Optimized database queries 
+•	Indexed database searches 
+
+Security
+•	bcrypt password hashing 
+•	AES-256 encryption for sensitive consumer information 
+•	JWT Authentication 
+•	HTTP Only Cookies 
+•	SQL Injection prevention 
+•	XSS protection 
+•	CSRF protection 
+•	Secure Headers using Helmet 
+•	Rate Limiting 
+•	Input Validation 
+•	Role Based Access Control 
+•	Audit Logging 
+•	Secure document storage 
+•	Encryption key management using environment variables 
+Scalability
+•	Modular architecture 
+•	Layered service architecture 
+•	Repository pattern 
+•	RESTful API design 
+Maintainability
+•	Clean folder structure 
+•	Reusable UI components 
+•	Environment-based configuration 
+•	Centralized logging 
+________________________________________
+6. Database Design
+Users
+users
+
+id (PK)
+
+first_name
+
+middle_name
+
+last_name
+
+gender
+
+email
+
+mobile_encrypted
+
+aadhaar_encrypted
+
+username
+
+password_hash
+
+ca_number
+
+meter_number
+
+role
+
+status
+
+created_at
+
+updated_at
+Primary Index
+PK(id)
+Secondary Indexes
+username
+
+email
+
+mobile
+
+ca_number
+
+meter_number
+________________________________________
+Connection Requests
+connection_requests
+
+id (PK)
+
+user_id (FK)
+
+application_number
+
+connection_type
+
+required_load
+
+property_address
+
+status
+
+submitted_at
+
+updated_at
+Primary Index
+PK(id)
+Secondary Indexes
+application_number
+
+status
+
+user_id
+________________________________________
+Admins
+admins
+
+id (PK)
+
+name
+
+email
+
+password_hash
+
+role
+
+created_at
+Secondary Index
+email
+________________________________________
+Document Metadata (New)
+(Actual files stored in MongoDB GridFS)
+documents
+
+id (PK)
+
+user_id (FK)
+
+connection_request_id (FK)
+
+document_name
+
+document_type
+
+gridfs_file_id
+
+file_size
+
+mime_type
+
+upload_date
+
+status
+Secondary Indexes
+user_id
+
+connection_request_id
+
+document_type
+________________________________________
+Notification Logs (New)
+notification_logs
+
+id (PK)
+
+user_id
+
+type
+
+recipient
+
+message
+
+status
+
+created_at
+Secondary Indexes
+user_id
+
+type
+
+status
+________________________________________
+Audit Logs (New)
+audit_logs
+
+id (PK)
+
+user_id
+
+performed_by
+
+action
+
+module
+
+ip_address
+
+timestamp
+Indexes
+performed_by
+
+timestamp
+________________________________________
+Consent Records (DPDP Compliance)
+consent_records
+
+id (PK)
+
+user_id
+
+consent_type
+
+accepted
+
+accepted_at
+
+ip_address
+Indexes
+user_id
+
+accepted_at
+________________________________________
+7. Folder Structure
+project
+
+client/
+
+├── app
+├── components
+├── hooks
+├── lib
+├── services
+├── store
+├── types
+└── utils
+
+server/
+
+src/
+
+├── controllers
+├── routes
+├── middlewares
+├── services
+├── auth.service.js
+├── notification.service.js
+├── sms.service.js
+├── whatsapp.service.js
+├── document.service.js
+├── encryption.service.js
+├── consent.service.js
+
+validators/
+repositories/
+├── config
+├── prisma
+├── utils
+├── logs
+
+app.js
+server.js
+________________________________________
+8. API Design
+Authentication
+POST   /api/auth/register
+POST   /api/auth/login
+POST   /api/auth/logout
+GET    /api/auth/me
+________________________________________
+Document APIs
+POST   /api/documents/upload
+
+GET    /api/documents/:id
+
+DELETE /api/documents/:id
+
+GET    /api/users/:id/documents
+________________________________________
+Notification APIs
+POST /api/notifications/sms
+
+POST /api/notifications/whatsapp
+________________________________________
+User
+GET    /api/users/profile
+PUT    /api/users/profile
+PUT    /api/users/change-password
+________________________________________
+Connection Requests
+POST   /api/connections/apply
+GET    /api/connections
+GET    /api/connections/:id
+PUT    /api/connections/:id
+________________________________________
+Admin
+GET    /api/admin/dashboard
+GET    /api/admin/users
+GET    /api/admin/user/:id
+PUT    /api/admin/user/:id
+DELETE /api/admin/user/:id
+
+GET    /api/admin/connection-requests
+PUT    /api/admin/connection-requests/:id
+________________________________________
+9. Registration Workflow
+User
+
+↓
+
+Open Registration Page
+
+↓
+
+Fill Registration Form
+
+↓
+
+User accepts Privacy Policy & DPDP Consent
+
+↓
+
+Frontend Validation
+
+↓
+
+Submit
+
+↓
+
+Backend Validation
+
+↓
+
+Encrypt Aadhaar Number
+
+↓
+
+Encrypt Mobile Number
+
+↓
+
+Store Consent Record
+
+↓
+
+Create User
+
+Send SMS Notification
+
+↓
+
+Send WhatsApp Notification
+
+Check Existing Consumer
+(CA Number / Meter Number)
+
+↓
+
+OR
+
+Proceed as New Consumer
+
+↓
+
+Validate Username
+
+↓
+
+Hash Password
+
+↓
+
+Store User
+
+↓
+
+Registration Successful
+
+↓
+
+Redirect to Login
+________________________________________
+10. New Connection Workflow
+User Login
+
+↓
+
+Dashboard
+
+↓
+
+Apply for New Connection
+
+↓
+
+Fill Application Form
+
+↓
+
+Upload Supporting Documents
+
+↓
+
+Store Documents in MongoDB GridFS
+
+↓
+
+Save Metadata in PostgreSQL
+
+↓
+
+Send Application Notification
+
+↓
+
+Frontend Validation
+
+↓
+
+Backend Validation
+
+↓
+
+Store Application
+
+↓
+
+Generate Application Number
+
+↓
+
+Status = Submitted
+
+↓
+
+Admin Verification
+
+↓
+
+Approve / Reject
+
+↓
+
+User Can Track Status
+________________________________________
+11. DPDP Act Compliance
+The application shall comply with the Digital Personal Data Protection Act, 2023 through the following measures:
+•	Obtain explicit user consent before collecting personal data. 
+•	Collect only the minimum personal information required for providing electricity services. 
+•	Encrypt sensitive personal information (e.g., Aadhaar number, identity documents) using AES-256 encryption. 
+•	Hash user passwords using bcrypt. 
+•	Store uploaded documents securely in MongoDB GridFS while maintaining document metadata in PostgreSQL. 
+•	Enforce Role-Based Access Control (RBAC) to restrict access to personal information. 
+•	Maintain audit logs for administrative and security-related actions. 
+•	Display a privacy notice and obtain consent during registration. 
+•	Allow secure deletion or retention of personal data in accordance with organizational policies and applicable legal requirements. 
+•	Protect all API communication using HTTPS and secure authentication mechanisms. 
+•	Manage encryption keys securely using environment variables or a dedicated secrets management solution.
+________________________________________
+12. Future Enhancements
+•	Email Verification (OTP)
+•	Mobile OTP Login
+•	Forgot Password
+•	Online Bill Viewing
+•	Online Bill Payment
+•	Complaint Registration & Tracking
+•	Power Outage Notifications
+•	Download Electricity Bills
+•	E-Bill Registration
+•	Solar Net Metering Requests
+•	EV Charging Connection Requests
+•	Multi-Factor Authentication (MFA)
+•	Push Notifications
+•	AI-powered Consumer Support Chatbot
+•	Smart Meter Integration
+•	Consumer Usage Analytics
+•	Digital Signature Verification
+•	API Integration with Existing BSES Systems
+

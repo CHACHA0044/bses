@@ -80,6 +80,11 @@ export const createApp = (): express.Application => {
       max: config.RATE_LIMIT_MAX,
       standardHeaders: 'draft-7',
       legacyHeaders: false,
+      // /ping is a 24-byte static canary with no data, state, or side effects —
+      // rate limiting it adds no security value and would risk blocking the
+      // keep-alive cron or Render's reviewer/preview checks. Everything else
+      // stays rate-limited as before.
+      skip: (req) => req.path === '/ping',
       message: {
         success: false,
         error: { code: 'RATE_LIMIT_ERROR', message: 'Too many requests. Please try again later.' },
