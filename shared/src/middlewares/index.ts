@@ -7,7 +7,7 @@ import { HTTP_STATUS } from '../constants';
 import { createLogger } from '../logger';
 import { requestIdMiddleware } from './requestId';
 
-const logger = createLogger({ service: 'shared-middleware' });
+const logger = createLogger({ service: 'middleware' });
 
 export { requestIdMiddleware };
 
@@ -22,32 +22,45 @@ export const correlationId = (req: Request, res: Response, next: NextFunction): 
 };
 
 /**
- * Request paths that should NOT be logged by `requestLogger`. These are
- * high-frequency, low-signal endpoints that would otherwise drown out the log
- * stream when scraped by Render's own liveness probes (the gateway health-check
- * path and every service's readiness probe). They are still served normally,
- * they just don't print a log line.
- *
- * `/ping` is DELIBERATELY NOT in this set: the gateway runs one lightweight
- * server-side keep-alive loop (apps/gateway/src/keepAlive.ts) that hits GET /ping
- * every 3 minutes. Each ping therefore logs a single `HTTP GET /ping -> 200`
- * line — that, plus the loop's `[KEEPALIVE]` log, is how we verify the keep-alive
- * is actually firing in Render's log stream.
+ * High-frequency low-signal paths skipped by requestLogger.
+ * `/ping` is intentionally NOT here — keepalive pings should appear in logs.
  */
 const REQUEST_LOG_SKIP_PATHS: ReadonlySet<string> = new Set(['/health', '/ready']);
+
+/**
+ * Emoji tag for a request path — makes the log stream visually scannable.
+ * Auth paths get 🔐, document paths get 📄, user paths get 👤, etc.
+ */
+const pathEmoji = (path: string): string => {
+  if (path.startsWith('/api/auth')) return '🔐';
+  if (path.startsWith('/api/documents')) return '📄';
+  if (path.startsWith('/api/users')) return '👤';
+  if (path.startsWith('/api/connections')) return '🔌';
+  if (path.startsWith('/api/notifications')) return '📧';
+  if (path.startsWith('/api/admin')) return '🛡️';
+  if (path === '/ping') return '💓';
+  return '🌐';
+};
 
 export const requestLogger = (req: Request, res: Response, next: NextFunction): void => {
   const start = Date.now();
   res.on('finish', () => {
-    // Skip noisy low-signal endpoints (see REQUEST_LOG_SKIP_PATHS doc).
     if (REQUEST_LOG_SKIP_PATHS.has(req.path)) return;
-    // Also skip HEAD probes (Render's liveness probe hits HEAD /).
     if (req.method === 'HEAD') return;
+
     const duration = Date.now() - start;
-    logger.info(`HTTP ${req.method} ${req.path} -> ${res.statusCode} (${duration}ms)`, {
-      correlationId: req.correlationId,
-      ip: req.ip,
-    });
+    const emoji = pathEmoji(req.path);
+    const status = res.statusCode;
+    const isError = status >= 400;
+    const arrow = isError ? '❌' : '→';
+
+    if (isError) {
+      logger.error(`${emoji} ${req.method} ${req.path} ${arrow} ${status} | ${duration}ms`, {
+        correlationId: req.correlationId,
+      });
+    } else {
+      logger.info(`${emoji} ${req.method} ${req.path} ${arrow} ${status} | ${duration}ms`);
+    }
   });
   next();
 };
@@ -78,11 +91,8 @@ export const globalErrorHandler = (
     return;
   }
 
-  logger.error('Unhandled error', {
+  logger.error(`❌ ${req.method} ${req.path} → 500 | unhandled`, {
     error: err instanceof Error ? err.message : String(err),
-    stack: err instanceof Error ? err.stack : undefined,
-    path: req.path,
-    method: req.method,
     correlationId: req.correlationId,
   });
 

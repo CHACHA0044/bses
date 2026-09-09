@@ -39,18 +39,13 @@ const start = async (): Promise<void> => {
   const app = createApp();
 
   const server = app.listen(config.PORT, () => {
-    logger.info('Gateway running', { port: config.PORT, env: config.NODE_ENV });
+    logger.info(`🚀 BSES Gateway started | port=${config.PORT} | env=${config.NODE_ENV}`);
   });
 
-  // One lightweight keep-alive scheduler, started exactly once alongside the
-  // server. It uses node-cron to hit the PUBLIC Render URL every 3 minutes
-  // (see keepAlive.ts for why it cannot wake a Render container that Render has
-  // already suspended).
   const keepAlive = startKeepAlive();
 
   const onSignal = (signal: string): void => {
-    logger.info(`${signal} received — keeping Gateway running 24/7 (shutdown ignored)`);
-    // Clear the timers so a graceful teardown path never leaks the loop.
+    logger.info(`📡 ${signal} received — keeping Gateway running 24/7`);
     keepAlive.stop();
   };
 
@@ -59,6 +54,6 @@ const start = async (): Promise<void> => {
 };
 
 start().catch((err: unknown) => {
-  console.error('Fatal: Gateway failed to start', err);
+  logger.error(`❌ Gateway failed to start | error=${err instanceof Error ? err.message : String(err)}`);
   process.exit(1);
 });

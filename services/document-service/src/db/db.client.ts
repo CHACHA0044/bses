@@ -45,6 +45,6 @@ export const disconnectDatabase = async (): Promise<void> => {
   if (prismaClient) {
     await prismaClient.$disconnect();
     prismaClient = null;
-    logger.info('Document Service database disconnected');
+    logger.info('🗄️ PostgreSQL disconnected');
   }
 };

@@ -49,16 +49,11 @@ export const startKeepAlive = (): KeepAliveHandle => {
   const ping = async (): Promise<void> => {
     const startedAt = Date.now();
     try {
-      logger.info(`[KEEPALIVE] Public ping attempt | url=${url}`);
       const res = await axios.get(url, { timeout: REQUEST_TIMEOUT_MS });
-      logger.info(
-        `[KEEPALIVE] Public ping successful | status=${res.status} | duration=${Date.now() - startedAt}ms`,
-      );
+      logger.info(`💓 Public keepalive → ${res.status} | ${Date.now() - startedAt}ms`);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
-      logger.warn(
-        `[KEEPALIVE] Public ping failed | error=${message} | duration=${Date.now() - startedAt}ms`,
-      );
+      logger.warn(`💔 Keepalive failed | reason=${message} | after=${Date.now() - startedAt}ms`);
     }
   };
 
@@ -67,17 +62,17 @@ export const startKeepAlive = (): KeepAliveHandle => {
     job = cron.schedule(SCHEDULE, ping, { noOverlap: true, unref: true });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
-    logger.error(`[KEEPALIVE] Cron scheduling failed | error=${message}`);
+    logger.error(`💔 Keepalive scheduler failed to start | error=${message}`);
     throw err;
   }
 
-  logger.info(`[KEEPALIVE] Cron scheduler started | interval=${SCHEDULE} | url=${url}`);
+  logger.info(`💓 Keepalive scheduler started | every=3m`);
 
   activeHandle = {
     stop: (): void => {
       job.stop();
       activeHandle = null;
-      logger.info('[KEEPALIVE] Cron scheduler stopped');
+      logger.info('💤 Keepalive scheduler stopped');
     },
   };
 

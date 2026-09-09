@@ -119,7 +119,7 @@ export class DocumentService {
     // anything that was left PROCESSING after a crash/restart.
     await ocrService.enqueue(document.id);
 
-    logger.info(`Uploaded document to GridFS (ID: ${gridfsFileId}, Metadata ID: ${document.id})`);
+    logger.info(`📄 Document uploaded | id=${document.id} | type=${dto.documentType}`);
     return document;
   }
 
@@ -185,7 +185,7 @@ export class DocumentService {
       const bucket = getGridFSBucket();
       await bucket.delete(new ObjectId(document.gridfsFileId));
     } catch (err: unknown) {
-      logger.warn(`Failed to delete binary from GridFS for file ${document.gridfsFileId}`, { error: err instanceof Error ? err.message : String(err) });
+      logger.warn(`⚠️ GridFS delete failed | file=${document.gridfsFileId} | error=${err instanceof Error ? err.message : String(err)}`);
     }
   }
 

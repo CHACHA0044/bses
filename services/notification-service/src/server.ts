@@ -8,24 +8,24 @@ const logger = createLogger({ service: 'notification-service' });
 
 const start = async (): Promise<void> => {
   try {
-    await connectDatabase().catch((err) => {
-      logger.warn(`PostgreSQL initial connection skipped: ${err.message}`);
-    });
+    await connectDatabase();
+    logger.info('🗄️ PostgreSQL connected');
   } catch (err: unknown) {
-    logger.warn('Notification Service starting with uninitialized database connection.');
+    const msg = err instanceof Error ? err.message : String(err);
+    logger.warn(`⚠️ PostgreSQL connection deferred | reason=${msg}`);
   }
 
   const app = createApp();
 
   const server = app.listen(config.PORT, '127.0.0.1', () => {
-    logger.info('Notification service running', { port: config.PORT, env: config.NODE_ENV });
+    logger.info(`🚀 Notification service ready | port=${config.PORT} | env=${config.NODE_ENV}`);
   });
 
   const shutdown = async (signal: string): Promise<void> => {
-    logger.info(`${signal} received — shutting down Notification service gracefully`);
+    logger.info(`🛑 ${signal} received — shutting down Notification service`);
     server.close(async () => {
       await disconnectDatabase();
-      logger.info('Notification service server closed.');
+      logger.info('✅ Notification service shut down');
       process.exit(0);
     });
   };
@@ -35,6 +35,6 @@ const start = async (): Promise<void> => {
 };
 
 start().catch((err: unknown) => {
-  console.error('Fatal: Notification service failed to start', err);
+  logger.error(`❌ Notification service failed to start | error=${err instanceof Error ? err.message : String(err)}`);
   process.exit(1);
 });

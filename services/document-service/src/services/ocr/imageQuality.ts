@@ -88,9 +88,7 @@ export const assessImageQuality = async (input: QualityInput): Promise<ImageQual
     // abort the OCR pipeline — the OCR path has its own error handling and
     // will fail/retry with a precise reason. Report a neutral score with no
     // gating issues so the decision engine is not misled.
-    logger.warn('Image quality scan failed; using neutral score', {
-      error: err instanceof Error ? err.message : String(err),
-    });
+    logger.warn(`⚠️ Image quality scan failed; using neutral score | error=${err instanceof Error ? err.message : String(err)}`);
     const clampedInk = input.inkRatio == null ? -1 : Math.max(0, Math.min(1, input.inkRatio));
     return {
       overall: 0.8,

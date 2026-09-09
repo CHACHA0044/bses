@@ -1,7 +1,7 @@
 import { createLogger } from '@bses/shared';
 import { config } from '../config';
 
-const logger = createLogger({ service: 'notification-client' });
+const logger = createLogger({ service: 'document' });
 
 const NOTIFICATION_SERVICE_URL = process.env['NOTIFICATION_SERVICE_URL'] || 'http://localhost:3013';
 
@@ -29,12 +29,10 @@ export class NotificationClient {
         signal: controller.signal,
       });
       if (!res.ok) {
-        logger.warn(`Notification service returned ${res.status} for ${path}`);
+        logger.warn(`⚠️ Notification service returned ${res.status} for ${path}`);
       }
     } catch (err) {
-      logger.error(`Failed to dispatch notification to ${path}`, {
-        error: err instanceof Error ? err.message : String(err),
-      });
+      logger.error(`❌ Notification dispatch failed | path=${path} | error=${err instanceof Error ? err.message : String(err)}`);
     } finally {
       clearTimeout(timer);
     }

@@ -1,24 +1,13 @@
 import type { Request, Response, NextFunction } from 'express';
-import { sendSuccess, createLogger } from '@bses/shared';
+import { sendSuccess } from '@bses/shared';
 import { adminService } from '../services/admin.service';
-
-const logger = createLogger({ service: 'admin-controller' });
 
 export class AdminController {
   public getDashboard = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-    const requestId = `[ADMIN_DASHBOARD_CTRL:${Date.now()}]`;
     try {
-      logger.info(
-        `${requestId} auth-ok user=${req.user?.sub ?? 'unknown'} role=${req.user?.role ?? 'unknown'}`,
-      );
       const analytics = await adminService.getDashboardAnalytics();
       sendSuccess(res, { analytics });
     } catch (err) {
-      logger.error(`${requestId} controller-error`, {
-        error: (err as Error).message,
-        name: (err as Error).name,
-        code: (err as any).code,
-      });
       next(err);
     }
   };

@@ -2,7 +2,7 @@ import { PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { createLogger, buildPostgresPoolConfig } from '@bses/shared';
 
-const logger = createLogger({ service: 'prisma-client' });
+const logger = createLogger({ service: 'auth-db' });
 
 let prismaInstance: PrismaClient | null = null;
 let prismaInitializing: Promise<PrismaClient> | null = null;
@@ -35,10 +35,7 @@ export const connectDatabase = async (): Promise<PrismaClient> => {
     const adapter = new PrismaPg(poolConfig);
     const client = new PrismaClient({
       adapter,
-      log:
-        process.env['NODE_ENV'] === 'production'
-          ? ['error', 'warn']
-          : ['error', 'warn', 'info', 'query'],
+      log: ['error', 'warn'],
     });
     await client.$connect();
     prismaInstance = client;
@@ -58,7 +55,7 @@ export const disconnectDatabase = async (): Promise<void> => {
   if (prismaInstance) {
     await prismaInstance.$disconnect();
     prismaInstance = null;
-    logger.info('Auth Service database disconnected');
+    logger.info('🗄️ PostgreSQL disconnected');
   }
 };
 
@@ -73,7 +70,7 @@ export const checkDatabaseHealth = async (): Promise<{
     await prismaInstance.$queryRaw`SELECT 1`;
     return { ready: true };
   } catch (err) {
-    logger.error('Database health check failed', { error: String(err) });
+    logger.error(`❌ Database health check failed | error=${String(err)}`);
     return { ready: false, details: { error: String(err) } };
   }
 };

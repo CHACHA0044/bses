@@ -5,7 +5,7 @@ import { encryptionService, NotFoundError, toDocumentView, createLogger } from '
 import { workflowService } from './workflow.service';
 import { getPrismaClient } from '../db/db.client';
 
-const logger = createLogger({ service: 'admin-service' });
+const logger = createLogger({ service: 'consumer' });
 
 export class AdminService {
   private get prisma() {
@@ -29,14 +29,9 @@ export class AdminService {
    *   - No unnecessary document/OCR data loading
    */
   public async getDashboardAnalytics(): Promise<any> {
-    const requestId = `[ADMIN_DASHBOARD:${Date.now()}]`;
     const t0 = Date.now();
 
     try {
-      // Stage 1: Authentication/authorization already done by middleware
-      // (if we reached here, auth-ok)
-      logger.info(`${requestId} start`);
-
       // Widen the date range to cover both monthly (6 months) and daily (14 days)
       const sixMonthsAgo = new Date();
       sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 5);
@@ -44,7 +39,6 @@ export class AdminService {
       sixMonthsAgo.setHours(0, 0, 0, 0);
 
       // Stage 2: Registration buckets — aggregated IN THE DATABASE (SQL)
-      // Only fetches date buckets with counts, not individual user rows.
       const registrationBucketQuery = this.prisma.$queryRaw<Array<{ bucket: Date; count: bigint }>>`
         SELECT
           date_trunc('day', "created_at")::date               AS bucket,
@@ -58,7 +52,6 @@ export class AdminService {
       // Stage 3: All independent queries fire in PARALLEL (Promise.all)
       // No sequential awaits — minimum latency.
       const t1 = Date.now();
-      logger.info(`${requestId} querying-summary`);
 
       const [
         connectionStats,
@@ -86,7 +79,7 @@ export class AdminService {
       ]);
 
       const t2 = Date.now();
-      logger.info(`${requestId} queries-complete elapsed=${t2 - t1}ms`);
+      logger.debug(`Dashboard queries complete | ${t2 - t1}ms`);
 
       // Stage 4: In-memory aggregation (only small maps/arrays, bounded data)
       // These are just JavaScript Maps with one entry per day/month, not full datasets.
@@ -177,15 +170,12 @@ export class AdminService {
       };
 
       const t3 = Date.now();
-      logger.info(`${requestId} response-ready elapsed=${t3 - t0}ms`);
+      logger.info(`🛡️ Admin dashboard | ${t3 - t0}ms`);
 
       return result;
     } catch (err) {
       const elapsed = Date.now() - t0;
-      logger.error(`${requestId} FAILED elapsed=${elapsed}ms`, {
-        error: (err as Error).message,
-        stack: (err as Error).stack?.split('\n').slice(0, 3).join(' | '),
-      });
+      logger.error(`❌ Admin dashboard failed | ${elapsed}ms | error=${(err as Error).message}`);
       throw err; // Re-throw so the controller returns 500 with structured error
     }
   }
@@ -279,9 +269,7 @@ export class AdminService {
           },
         })
         .catch((err) => {
-          logger.warn('Failed to create audit log for user view', {
-            error: (err as Error).message,
-          });
+          logger.warn(`⚠️ Audit log write failed | error=${(err as Error).message}`);
         }),
     ]);
 
@@ -384,9 +372,7 @@ export class AdminService {
         },
       })
       .catch((err) => {
-        logger.warn('Failed to create audit log for user export', {
-          error: (err as Error).message,
-        });
+        logger.warn(`⚠️ Audit log write failed | error=${(err as Error).message}`);
       });
 
     return detail;

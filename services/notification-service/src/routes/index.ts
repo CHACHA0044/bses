@@ -6,7 +6,7 @@ import { createLogger } from '@bses/shared';
 import { getPrismaClient } from '../db/db.client';
 import { requireInternalSecret } from '../middleware/internal-auth';
 
-const logger = createLogger({ service: 'notification-routes' });
+const logger = createLogger({ service: 'notification' });
 
 const router = Router();
 
@@ -24,7 +24,7 @@ const persistNotificationLog = async (userId: string | undefined, type: Notifica
       data: { userId, type, recipient, message, status: status as any },
     });
   } catch (err) {
-    logger.error('Failed to persist notification log', { error: err instanceof Error ? err.message : String(err) });
+    logger.error(`❌ Failed to persist notification log | error=${err instanceof Error ? err.message : String(err)}`);
   }
 };
 

@@ -1,18 +1,12 @@
 import type winston from 'winston';
 
 export interface MemorySnapshot {
-  /** Process RSS in MB (total resident set — the number that counts against
-   *  Render's hard memory cap). */
   rssMb: number;
-  /** V8 heap used in MB (subset of RSS; excludes native/allocated buffers). */
   heapUsedMb: number;
-  /** V8 heap total in MB. */
   heapTotalMb: number;
-  /** Size in MB of memory allocated to external C++ (buffers, sharp, etc.). */
   externalMb: number;
 }
 
-/** One-line memory snapshot usable in log context. */
 export const getMemorySnapshot = (): MemorySnapshot => {
   const usage = process.memoryUsage();
   return {
@@ -23,11 +17,17 @@ export const getMemorySnapshot = (): MemorySnapshot => {
   };
 };
 
+/** Render's hard memory cap for this tier. */
+const MEMORY_CAP_MB = 512;
+const WARN_THRESHOLD = 0.85;  // 435 MB
+const CRIT_THRESHOLD = 0.95;  // 486 MB
+
 /**
  * Periodically logs this process's memory footprint so a memory regression
- * shows up in Render logs BEFORE the container is OOM-killed. Cheap: one
- * `process.memoryUsage()` call per tick (the value is sampled, not polled
- * continuously). Returns a handle so the caller can stop it on shutdown.
+ * shows up in Render logs BEFORE the container is OOM-killed.
+ *
+ * Format: 🧠 Memory | total=316MB | rss=57MB | heap=7.8MB
+ * Only escalates to ⚠️ / 🚨 when approaching the Render cap.
  */
 export const startMemoryMonitor = (
   logger: winston.Logger,
@@ -36,14 +36,17 @@ export const startMemoryMonitor = (
 ): { stop: () => void } => {
   const log = (): void => {
     const m = getMemorySnapshot();
-    logger.info(`[MEMORY:${label}]`, {
-      rssMb: m.rssMb,
-      heapUsedMb: m.heapUsedMb,
-      heapTotalMb: m.heapTotalMb,
-      externalMb: m.externalMb,
-    });
+    const totalMb = Math.round(m.rssMb * 10) / 10;
+    const usageRatio = totalMb / MEMORY_CAP_MB;
+
+    if (usageRatio >= CRIT_THRESHOLD) {
+      logger.error(`🚨 Memory critical | total=${totalMb}MB / ${MEMORY_CAP_MB}MB | rss=${m.rssMb}MB | heap=${m.heapUsedMb}MB`);
+    } else if (usageRatio >= WARN_THRESHOLD) {
+      logger.warn(`⚠️ Memory high | total=${totalMb}MB / ${MEMORY_CAP_MB}MB | rss=${m.rssMb}MB | heap=${m.heapUsedMb}MB`);
+    } else {
+      logger.info(`🧠 Memory | total=${totalMb}MB | rss=${m.rssMb}MB | heap=${m.heapUsedMb}MB | ext=${m.externalMb}MB`);
+    }
   };
-  // First sample shortly after start (captures baseline before steady state).
   const first = setTimeout(log, 30_000);
   first.unref();
   const interval = setInterval(log, intervalMs);

@@ -51,55 +51,14 @@ const SHUTDOWN_WAIT_MS = 10_000;
 const REASON_NORMAL = 0;
 
 /**
-  Formats raw stdout/stderr lines from child processes into clean, human-readable
-  log entries for the supervisor console stream.
+ * Pass through child log lines as-is. Children already emit formatted logs
+ * with their own [service] prefix and timestamp from the shared logger.
+ * We avoid re-wrapping to prevent double-prefixing.
  */
-function formatChildLog(serviceName: string, rawLine: string): string {
+function formatChildLog(_serviceName: string, rawLine: string): string {
   const trimmed = rawLine.trim();
   if (!trimmed) return '';
-
-  if (trimmed.startsWith(`[${serviceName}]`)) {
-    return trimmed;
-  }
-
-  if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
-    try {
-      const parsed = JSON.parse(trimmed) as Record<string, unknown>;
-      if (typeof parsed === 'object' && parsed !== null) {
-        const level = String(parsed['level'] || 'info').toUpperCase();
-        const msg = String(parsed['message'] || '');
-        const service = parsed['service'] ? String(parsed['service']) : serviceName;
-
-        if (parsed['method'] && parsed['path'] && parsed['status']) {
-          const ms = parsed['ms'] !== undefined ? ` (${parsed['ms']}ms)` : '';
-          return `[${serviceName}] ${level} [${service}]: HTTP ${parsed['method']} ${parsed['path']} -> ${parsed['status']}${ms}`;
-        }
-
-        const { level: _l, timestamp: _t, service: _s, message: _m, ...rest } = parsed;
-        const keys = Object.keys(rest);
-        let metaStr = '';
-        if (keys.length > 0) {
-          const parts = keys.map((k) => {
-            const val = rest[k];
-            if (typeof val === 'object' && val !== null) {
-              try {
-                return `${k}=${JSON.stringify(val)}`;
-              } catch {
-                return `${k}=[object]`;
-              }
-            }
-            return `${k}=${String(val)}`;
-          });
-          metaStr = ` (${parts.join(', ')})`;
-        }
-        return `[${serviceName}] ${level} [${service}]: ${msg}${metaStr}`;
-      }
-    } catch {
-      /* fallback to raw line */
-    }
-  }
-
-  return `[${serviceName}] ${trimmed}`;
+  return trimmed;
 }
 
 /**
@@ -150,11 +109,9 @@ export class ChildManager {
         serialization: 'advanced',
       });
     } catch (err) {
-      logger.error(`[supervisor] failed to fork ${this.options.spec.name}`, {
-        error: err instanceof Error ? err.message : String(err),
-        entry: entryPath,
-        cwd: this.options.spec.cwd,
-      });
+      logger.error(
+        `❌ Failed to fork ${this.options.spec.name} | error=${err instanceof Error ? err.message : String(err)} | entry=${entryPath}`,
+      );
       this.scheduleRestart('fork-error');
       return;
     }
@@ -164,12 +121,7 @@ export class ChildManager {
     this.status.lastStartedAt = Date.now();
     this.status.uptimeSeconds = 0;
 
-    logger.info(`[supervisor] ${this.options.spec.name} starting`, {
-      pid: child.pid,
-      port: this.options.spec.port,
-      cwd: this.options.spec.cwd,
-      entry: entryPath,
-    });
+    logger.info(`🚀 ${this.options.spec.name} starting | pid=${child.pid} | port=${this.options.spec.port}`);
 
     child.stdout?.setEncoding('utf8');
     child.stderr?.setEncoding('utf8');
@@ -197,9 +149,7 @@ export class ChildManager {
     });
 
     child.on('error', (err) => {
-      logger.error(`[supervisor] ${this.options.spec.name} process error`, {
-        error: err.message,
-      });
+      logger.error(`❌ ${this.options.spec.name} process error | error=${err.message}`);
     });
 
     child.on('message', (message: unknown) => {
@@ -215,18 +165,11 @@ export class ChildManager {
 
       if (this.shuttingDown) {
         this.updateState('stopped');
-        logger.info(`[supervisor] ${this.options.spec.name} exited during shutdown`, {
-          code,
-          signal,
-        });
+        logger.info(`🛑 ${this.options.spec.name} exited during shutdown | code=${code ?? signal ?? 'n/a'}`);
         return;
       }
 
-      logger.warn(`[supervisor] ${this.options.spec.name} exited`, {
-        code,
-        signal,
-        restarts: this.status.restarts,
-      });
+      logger.warn(`⚠️ ${this.options.spec.name} exited | code=${code ?? signal ?? 'unknown'} | restarts=${this.status.restarts}`);
       this.scheduleRestart(`exit:${code ?? signal ?? 'unknown'}`);
     });
 
@@ -251,9 +194,7 @@ export class ChildManager {
       } else if (Date.now() - this.readyStartedAt > READY_TIMEOUT_MS) {
         // Never became ready within timeout — a hung service. Restart it.
         this.clearReadyTimer();
-        logger.error(`[supervisor] ${this.options.spec.name} did not become ready within ${READY_TIMEOUT_MS}ms; restarting`, {
-          port: this.options.spec.port,
-        });
+        logger.error(`❌ ${this.options.spec.name} not ready in ${READY_TIMEOUT_MS}ms; restarting`);
         this.killChild();
         this.scheduleRestart('ready-timeout');
       }
@@ -321,8 +262,7 @@ export class ChildManager {
     if (this.inCrashLoop()) {
       const pause = CRASH_LOOP_PAUSE_MS;
       logger.error(
-        `[supervisor] ${this.options.spec.name} exceeded ${MAX_RESTARTS_IN_WINDOW} restarts in ${CRASH_LOOP_WINDOW_MS / 60000}min — pausing for ${pause / 1000}s before next attempt`,
-        { reason, restarts: this.status.restarts },
+        `🚨 ${this.options.spec.name} crash loop (${this.status.restarts} restarts in ${CRASH_LOOP_WINDOW_MS / 60000}min) — pausing ${pause / 1000}s | reason=${reason}`,
       );
       this.updateState('restarting');
       this.backoffMs = MAX_BACKOFF_MS; // hold at max after crash-loop
@@ -335,11 +275,7 @@ export class ChildManager {
     this.backoffMs = Math.min(this.backoffMs * BACKOFF_MULTIPLIER, MAX_BACKOFF_MS);
 
     this.updateState('restarting');
-    logger.warn(`[supervisor] ${this.options.spec.name} restart scheduled in ${backoff}ms`, {
-      reason,
-      backoffMs: backoff,
-      restarts: this.status.restarts,
-    });
+    logger.warn(`🔄 Restarting ${this.options.spec.name} in ${backoff}ms | attempt=${this.status.restarts} | reason=${reason}`);
 
     const timer = setTimeout(() => this.start(), backoff);
     timer.unref();
@@ -361,7 +297,7 @@ export class ChildManager {
 
   /** Kept alive 24/7 — child processes are not terminated by shutdown requests. */
   public shutdown(): void {
-    logger.info(`[supervisor] keeping ${this.options.spec.name} running 24/7 (shutdown request ignored)`);
+    logger.info(`📡 Keeping ${this.options.spec.name} running 24/7 (shutdown ignored)`);
   }
 
   public getChild(): ChildProcess | null {

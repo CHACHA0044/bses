@@ -2,44 +2,60 @@ import winston from 'winston';
 
 const { combine, timestamp, printf, colorize, errors, json } = winston.format;
 
+/**
+ * Compact, human-readable production format.
+ *
+ * Renders as:
+ *   [HH:mm:ss] [service] 🔧 message | key=value
+ *
+ * Render already provides timestamps at the platform level, but we include
+ * a short HH:mm:ss for local/dev readability. The emoji prefix is part of
+ * the message — operators can scan the log stream visually.
+ */
 const readableFormat = combine(
-  timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
+  timestamp({ format: 'HH:mm:ss' }),
   errors({ stack: true }),
   printf(({ timestamp, level, message, service, stack, ...meta }) => {
-    const levelStr = String(level).toUpperCase();
-    const serviceStr = String(service ?? 'app');
-    const msgStr = String(stack ?? message);
+    const svc = String(service ?? 'app');
+    const msg = String(stack ?? message);
 
-    let metaParts: string[] = [];
+    const metaParts: string[] = [];
     if (Object.keys(meta).length > 0) {
-      metaParts = Object.entries(meta).map(([k, v]) => {
-        if (typeof v === 'object' && v !== null) {
+      for (const [k, v] of Object.entries(meta)) {
+        if (v === undefined || v === null) continue;
+        if (typeof v === 'object') {
           try {
-            return `${k}=${JSON.stringify(v)}`;
+            metaParts.push(`${k}=${JSON.stringify(v)}`);
           } catch {
-            return `${k}=[object]`;
+            metaParts.push(`${k}=[object]`);
           }
+        } else {
+          metaParts.push(`${k}=${String(v)}`);
         }
-        return `${k}=${String(v)}`;
-      });
+      }
     }
-
-    const metaStr = metaParts.length > 0 ? ` (${metaParts.join(', ')})` : '';
-    return `[${String(timestamp)}] [${serviceStr}] ${levelStr}: ${msgStr}${metaStr}`;
+    const suffix = metaParts.length > 0 ? ` | ${metaParts.join(' | ')}` : '';
+    return `[${timestamp}] [${svc}] ${msg}${suffix}`;
   }),
 );
 
+/**
+ * Colorized dev format — same structure but with ANSI colors for terminal.
+ */
 const devFormat = combine(
   colorize({ all: true }),
-  timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
+  timestamp({ format: 'HH:mm:ss' }),
   errors({ stack: true }),
   printf(({ timestamp, level, message, service, stack, ...meta }) => {
-    const metaStr = Object.keys(meta).length > 0 ? ` ${JSON.stringify(meta)}` : '';
-    return `[${String(timestamp)}] [${String(service ?? 'app')}] ${level}: ${String(stack ?? message)}${metaStr}`;
+    const svc = String(service ?? 'app');
+    const msg = String(stack ?? message);
+    const metaStr = Object.keys(meta).length > 0 ? ` | ${JSON.stringify(meta)}` : '';
+    return `[${timestamp}] [${svc}] ${msg}${metaStr}`;
   }),
 );
 
-const prodFormat = combine(timestamp(), errors({ stack: true }), json());
+/** JSON format for machine-parseable output (LOG_FORMAT=json). */
+const jsonFormat = combine(timestamp(), errors({ stack: true }), json());
 
 export interface LoggerOptions {
   service: string;
@@ -51,12 +67,8 @@ export const createLogger = ({ service }: LoggerOptions): winston.Logger => {
   const logFormat = process.env['LOG_FORMAT'] ?? 'pretty';
 
   const consoleFormat =
-    logFormat === 'json' ? prodFormat : isProduction ? readableFormat : devFormat;
+    logFormat === 'json' ? jsonFormat : isProduction ? readableFormat : devFormat;
 
-  // Production uses Console only — Render captures stdout/stderr directly.
-  // File logging (DailyRotateFile) is removed to eliminate disk I/O contention,
-  // reduce memory overhead (10 file handles + rotation timers across 5 processes),
-  // and fix delayed log visibility in Render's dashboard.
   const transports: winston.transport[] = [
     new winston.transports.Console({
       format: consoleFormat,
@@ -64,10 +76,6 @@ export const createLogger = ({ service }: LoggerOptions): winston.Logger => {
     }),
   ];
 
-  // Production defaults to 'info' so request logs, login attempts, and other
-  // diagnostic logs are visible in Render's log stream. Operators can dial
-  // this down via LOG_LEVEL=warn if they want less noise. Dev defaults to
-  // 'debug' for verbose local development.
   const defaultLevel = isProduction ? 'info' : 'debug';
   const level = process.env['LOG_LEVEL'] || defaultLevel;
 

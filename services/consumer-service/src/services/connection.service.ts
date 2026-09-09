@@ -183,7 +183,7 @@ export class ConnectionService {
   }
 
   public async getDashboardData(userId: string): Promise<any> {
-    logger.info(`Dashboard data requested for userId=${userId}`);
+    logger.debug(`Dashboard data requested | user=${userId.substring(0, 4)}***`);
 
     const [user, connections, recentLogs] = await Promise.all([
       userRepository.findById(userId),

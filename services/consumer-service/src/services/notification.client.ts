@@ -1,7 +1,7 @@
 import axios from 'axios';
 import { createLogger } from '@bses/shared';
 
-const logger = createLogger({ service: 'notification-client' });
+const logger = createLogger({ service: 'consumer' });
 
 const NOTIFICATION_SERVICE_URL = process.env['NOTIFICATION_SERVICE_URL'] || 'http://localhost:3013';
 
@@ -20,18 +20,18 @@ export class NotificationClient {
   public async sendSms(recipient: string, message: string, userId?: string): Promise<void> {
     try {
       await client.post('/api/notifications/sms', { recipient, message, ...(userId && { userId }) });
-      logger.info('SMS notification dispatched', { recipient: recipient.substring(0, 4) + '****' });
+      logger.info(`📧 SMS dispatched | to=${recipient.substring(0, 4)}****`);
     } catch (err: unknown) {
-      logger.error('Failed to send SMS notification', { error: err instanceof Error ? err.message : String(err) });
+      logger.error(`❌ SMS dispatch failed | error=${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
   public async sendWhatsApp(recipient: string, message: string, userId?: string): Promise<void> {
     try {
       await client.post('/api/notifications/whatsapp', { recipient, message, ...(userId && { userId }) });
-      logger.info('WhatsApp notification dispatched', { recipient: recipient.substring(0, 4) + '****' });
+      logger.info(`📧 WhatsApp dispatched | to=${recipient.substring(0, 4)}****`);
     } catch (err: unknown) {
-      logger.error('Failed to send WhatsApp notification', { error: err instanceof Error ? err.message : String(err) });
+      logger.error(`❌ WhatsApp dispatch failed | error=${err instanceof Error ? err.message : String(err)}`);
     }
   }
 

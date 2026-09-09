@@ -11,12 +11,13 @@ export interface IWhatsAppProvider {
 }
 
 import { createLogger } from '@bses/shared';
-const logger = createLogger({ service: 'mock-whatsapp-provider' });
+const logger = createLogger({ service: 'notification' });
 
 export class MockWhatsAppProvider implements IWhatsAppProvider {
   public async sendWhatsApp(recipient: string, message: string): Promise<SendWhatsAppResult> {
     const messageId = `wa_sim_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-    logger.info(`[WHATSAPP DEV SIMULATOR] To: ${recipient} | MessageId: ${messageId} | Content: ${message}`);
+    const masked = recipient.length > 4 ? `${recipient.slice(0, 4)}****` : '****';
+    logger.info(`📧 WhatsApp (simulated) | to=${masked} | id=${messageId} | chars=${message.length}`);
     return {
       status: NotificationStatus.SIMULATED,
       messageId,

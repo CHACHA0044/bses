@@ -5,7 +5,7 @@ import { createProxyMiddleware, fixRequestBody } from 'http-proxy-middleware';
 import { createLogger, isAllowedOrigin } from '@bses/shared';
 import { config } from '../config';
 
-const logger = createLogger({ service: 'gateway-proxy' });
+const logger = createLogger({ service: 'gateway' });
 
 /**
  * Proxy routing table forwarding API requests from Gateway to microservices.
@@ -106,16 +106,8 @@ export const registerRoutes = (app: Application): void => {
             }
           },
           error: (err: Error, req: any, res: any) => {
-            // Surface the actual upstream failure (timeout, ECONNREFUSED,
-            // ECONNRESET, ...) with the correlation ID so the root cause is
-            // traceable to a specific service instead of a blind 503.
-            logger.error('Upstream proxy error', {
-              code: (err as NodeJS.ErrnoException).code,
-              message: err.message,
-              correlationId: req?.correlationId,
-              method: req?.method,
-              url: req?.originalUrl,
-            });
+            const code = (err as NodeJS.ErrnoException).code;
+            logger.error(`❌ Proxy ${req?.method} ${req?.originalUrl} → 503 | code=${code} | error=${err.message} | correlationId=${req?.correlationId ?? 'n/a'}`);
             if (!res.headersSent) {
               res.status(503).json({
                 success: false,

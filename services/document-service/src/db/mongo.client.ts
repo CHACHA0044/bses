@@ -1,7 +1,7 @@
 import { MongoClient, GridFSBucket, Db } from 'mongodb';
 import { createLogger } from '@bses/shared';
 
-const logger = createLogger({ service: 'mongo-client' });
+const logger = createLogger({ service: 'document-db' });
 
 let mongoClientInstance: MongoClient | null = null;
 let dbInstance: Db | null = null;
@@ -22,16 +22,10 @@ export const connectMongoDB = async (
   let attempts = 0;
   let delay = initialDelayMs;
 
-  // Redact the password from a MongoSRV URI for safe logging.
-  const redactUri = (raw: string): string =>
-    raw.replace(/(mongodb(?:\+srv)?:\/\/[^:]+:)([^@]+)(@)/, '$1***$3');
-
   while (attempts < maxRetries) {
     try {
       attempts++;
-      logger.info(
-        `Connecting to MongoDB Atlas (Attempt ${attempts}/${maxRetries}) -> ${redactUri(uri)}`,
-      );
+      logger.debug(`Connecting to MongoDB (attempt ${attempts}/${maxRetries})`);
 
       if (!mongoClientInstance) {
         mongoClientInstance = new MongoClient(uri, {
@@ -46,14 +40,14 @@ export const connectMongoDB = async (
       dbInstance = mongoClientInstance.db();
       gridfsBucketInstance = new GridFSBucket(dbInstance, { bucketName });
 
-      logger.info(`Successfully connected to MongoDB. GridFS bucket '${bucketName}' initialized.`);
+      logger.info(`🍃 MongoDB connected | GridFS=${bucketName}`);
       return { client: mongoClientInstance, db: dbInstance, bucket: gridfsBucketInstance };
     } catch (err: unknown) {
       logger.warn(
-        `MongoDB connection attempt ${attempts}/${maxRetries} failed: ${err instanceof Error ? err.message : String(err)}`,
+        `⚠️ MongoDB attempt ${attempts}/${maxRetries} failed | error=${err instanceof Error ? err.message : String(err)}`,
       );
       if (attempts >= maxRetries) {
-        logger.error('Max MongoDB connection retries reached. Database unavailable.');
+        logger.error(`❌ MongoDB connection failed after ${maxRetries} retries`);
         throw err;
       }
       await new Promise((resolve) => setTimeout(resolve, delay));
@@ -73,12 +67,12 @@ export const getGridFSBucket = (): GridFSBucket => {
 
 export const disconnectMongoDB = async (): Promise<void> => {
   if (mongoClientInstance) {
-    logger.info('Disconnecting MongoDB client...');
+    logger.debug('Disconnecting MongoDB client...');
     await mongoClientInstance.close();
     mongoClientInstance = null;
     dbInstance = null;
     gridfsBucketInstance = null;
-    logger.info('MongoDB client disconnected cleanly.');
+    logger.info('🍃 MongoDB disconnected');
   }
 };
 

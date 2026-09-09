@@ -27,7 +27,7 @@ import type winston from 'winston';
 const resolveIPv4 = async (hostname: string, logger: winston.Logger): Promise<string | null> => {
   const override = process.env['DATABASE_HOST'];
   if (override && override !== hostname) {
-    logger.info(`Using DATABASE_HOST override ${override} for ${hostname}`);
+    logger.debug(`Using DATABASE_HOST override ${override} for ${hostname}`);
     return override;
   }
   try {
@@ -44,7 +44,7 @@ const resolveIPv4 = async (hostname: string, logger: winston.Logger): Promise<st
       const result = await dns.promises.lookup(hostname, { family: 4, verbatim: true, hints: 0 });
       const address = typeof result === 'string' ? result : result.address;
       if (address) {
-        logger.info(`Resolved ${hostname} -> ${address} via public DNS ${resolver}`);
+        logger.debug(`Resolved ${hostname} -> ${address} via public DNS ${resolver}`);
         return address;
       }
     } catch {
@@ -108,7 +108,7 @@ export const buildPostgresPoolConfig = async (logger: winston.Logger): Promise<P
 
   const ipv4 = await resolveIPv4(hostname, logger);
   if (ipv4) {
-    logger.info(`Resolved ${hostname} -> ${ipv4} (IPv4 forced for Postgres)`);
+    logger.debug(`Resolved ${hostname} -> ${ipv4} (IPv4 forced for Postgres)`);
     const options = neonOptionsParam(parsed, hostname);
     return {
       host: ipv4,

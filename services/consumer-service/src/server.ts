@@ -8,24 +8,24 @@ const logger = createLogger({ service: 'consumer-service' });
 
 const start = async (): Promise<void> => {
   try {
-    await connectDatabase().catch((err) => {
-      logger.warn(`PostgreSQL initial connection skipped: ${err.message}`);
-    });
+    await connectDatabase();
+    logger.info('🗄️ PostgreSQL connected');
   } catch (err: unknown) {
-    logger.warn('Consumer Service starting with uninitialized database connection.');
+    const msg = err instanceof Error ? err.message : String(err);
+    logger.warn(`⚠️ PostgreSQL connection deferred | reason=${msg}`);
   }
 
   const app = createApp();
 
   const server = app.listen(config.PORT, '127.0.0.1', () => {
-    logger.info('Consumer service running', { port: config.PORT, env: config.NODE_ENV });
+    logger.info(`🚀 Consumer service ready | port=${config.PORT} | env=${config.NODE_ENV}`);
   });
 
   const shutdown = async (signal: string): Promise<void> => {
-    logger.info(`${signal} received — shutting down Consumer service gracefully`);
+    logger.info(`🛑 ${signal} received — shutting down Consumer service`);
     server.close(async () => {
       await disconnectDatabase();
-      logger.info('Consumer service server closed.');
+      logger.info('✅ Consumer service shut down');
       process.exit(0);
     });
   };
@@ -35,6 +35,6 @@ const start = async (): Promise<void> => {
 };
 
 start().catch((err: unknown) => {
-  console.error('Fatal: Consumer service failed to start', err);
+  logger.error(`❌ Consumer service failed to start | error=${err instanceof Error ? err.message : String(err)}`);
   process.exit(1);
 });

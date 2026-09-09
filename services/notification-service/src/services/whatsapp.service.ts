@@ -1,13 +1,11 @@
 import { createLogger, NotificationStatus } from '@bses/shared';
 
-const logger = createLogger({ service: 'whatsapp-service' });
+const logger = createLogger({ service: 'notification' });
 
 export class WhatsappService {
-  /**
-   * Simulates sending a WhatsApp message during development/testing as required by the SRS.
-   */
   public async sendWhatsApp(recipient: string, message: string): Promise<NotificationStatus> {
-    logger.info(`[WHATSAPP SIMULATION] To: ${recipient} | Message: ${message}`);
+    const masked = recipient.length > 4 ? `${recipient.slice(0, 4)}****` : '****';
+    logger.debug(`WhatsApp (simulated) | to=${masked} | chars=${message.length}`);
     return NotificationStatus.SIMULATED;
   }
 }

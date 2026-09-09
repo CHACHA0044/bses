@@ -14,18 +14,18 @@ export class NotificationClient {
   public async sendSms(recipient: string, message: string): Promise<void> {
     try {
       await client.post('/api/notifications/sms', { recipient, message });
-      logger.info('SMS notification dispatched from auth-service', { recipient: recipient.substring(0, 4) + '****' });
+      logger.info(`📧 SMS dispatched | to=${recipient.substring(0, 4)}****`);
     } catch (err: unknown) {
-      logger.error('Failed to send SMS from auth-service', { error: err instanceof Error ? err.message : String(err) });
+      logger.error(`❌ SMS dispatch failed | error=${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
   public async sendWhatsApp(recipient: string, message: string): Promise<void> {
     try {
       await client.post('/api/notifications/whatsapp', { recipient, message });
-      logger.info('WhatsApp notification dispatched from auth-service', { recipient: recipient.substring(0, 4) + '****' });
+      logger.info(`📧 WhatsApp dispatched | to=${recipient.substring(0, 4)}****`);
     } catch (err: unknown) {
-      logger.error('Failed to send WhatsApp from auth-service', { error: err instanceof Error ? err.message : String(err) });
+      logger.error(`❌ WhatsApp dispatch failed | error=${err instanceof Error ? err.message : String(err)}`);
     }
   }
 

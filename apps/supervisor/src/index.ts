@@ -16,14 +16,6 @@ interface SupervisorOptions {
  * SINGLE Render Web Service. Only the gateway child binds the public port
  * (process.env.PORT, 0.0.0.0); all other services bind 127.0.0.1 loopback
  * ports and are reachable only through the gateway's HTTP proxy.
- *
- * Responsibilities:
- *   - Fork each child with the right cwd + env.
- *   - Verify readiness via loopback /health instead of relying on a magic delay.
- *   - Detect crashes and restart ONLY the affected service (exponential backoff,
- *     crash-loop protection).
- *   - Forward child stdout/stderr into the supervisor's own logs (prefixed).
- *   - Graceful shutdown (SIGTERM/SIGINT) of all children.
  */
 class Supervisor {
   public readonly children: ChildManager[] = [];
@@ -35,15 +27,14 @@ class Supervisor {
     const env = process.env;
     const services = getServices(env);
 
-    // Guard against internal port collisions (public PORT vs loopback ports).
     this.validatePorts(services, env['PORT']);
 
-    logger.info('[STARTUP] BSES Backend supervisor starting', {
-      node: process.version,
-      env: env['NODE_ENV'] ?? 'development',
-      publicPort: env['PORT'] ?? 'not-set (uses gateway default 3000)',
-      services: services.map((s) => ({ name: s.name, port: s.port, isGateway: s.isGateway })),
-    });
+    const portStr = env['PORT'] ?? '3000';
+    const envStr = env['NODE_ENV'] ?? 'development';
+
+    logger.info('🚀 BSES Backend starting');
+    logger.info(`🔧 Environment: ${envStr}`);
+    logger.info(`🌐 Gateway port: ${portStr}`);
 
     const gatewayEnv = buildGatewayEnv(env, services);
     const nonGatewaySpecs = services.filter((s) => !s.isGateway);
@@ -51,7 +42,6 @@ class Supervisor {
 
     const readyPromises: Promise<void>[] = [];
 
-    // Launch internal microservices (auth, consumer, document, notification) first
     for (const spec of nonGatewaySpecs) {
       let resolveReady: () => void;
       const readyPromise = new Promise<void>((res) => {
@@ -63,7 +53,7 @@ class Supervisor {
         spec,
         env: buildServiceEnv(env, spec),
         onReady: (name) => {
-          logger.info(`[STARTUP] ${name} service initialized`);
+          logger.info(`✅ ${name} ready`);
           resolveReady();
         },
         onStateChange: () => this.pushStatusToGateway(),
@@ -73,19 +63,18 @@ class Supervisor {
       manager.start();
     }
 
-    // Wait until internal microservices are ready (or up to 30s timeout) before launching Gateway
-    logger.info('[STARTUP] Initializing internal microservices before launching public Gateway...');
+    logger.info('🧩 Starting internal services...');
     await Promise.race([
       Promise.all(readyPromises),
       new Promise<void>((res) => setTimeout(res, 30_000)),
     ]);
 
     if (gatewaySpec) {
-      logger.info('[STARTUP] Internal microservices ready. Launching public Gateway...');
+      logger.info('🌐 Launching gateway...');
       const manager = new ChildManager({
         spec: gatewaySpec,
         env: gatewayEnv,
-        onReady: (name) => logger.info(`[STARTUP] ${name} service initialized`),
+        onReady: (name) => logger.info(`✅ ${name} ready`),
         onStateChange: () => this.pushStatusToGateway(),
         onMessage: (pid, message) => this.handleGatewayRequest(pid, message),
       });
@@ -97,7 +86,6 @@ class Supervisor {
     this.installHeartbeat();
   }
 
-  /** Periodically re-syncs status to the gateway so /health/services stays current. */
   private installHeartbeat(): void {
     const heartbeat = setInterval(() => {
       if (this.shuttingDown) return;
@@ -108,11 +96,8 @@ class Supervisor {
   }
 
   /**
-   * Logs the combined RSS of the supervisor plus every child process. Render
-   * OOM-kills the container when the SUM crosses the hard cap, so the first
-   * sign of a leak shows up in these lines rather than as a silent restart.
-   * Child RSS is read from the OS (each child's `process.memoryUsage` would
-   * otherwise need per-child IPC).
+   * Compact memory log: 🧠 Memory | total=316MB | supervisor=57MB | merged=179MB | gateway=80MB
+   * Escalates to ⚠️/🚨 at high usage thresholds.
    */
   private logCombinedMemory(): void {
     const ext = process.memoryUsage();
@@ -122,23 +107,26 @@ class Supervisor {
     }, 0);
     const superRssMb = Math.round((ext.rss / 1024 / 1024) * 10) / 10;
     const childRssTotalMb = Math.round((childRssMb / 1024 / 1024) * 10) / 10;
-    const perChild = this.children
-      .map((c) => `${c.status.name}~${Math.max(0, Math.round((c.getRssBytes() / 1024 / 1024) * 10) / 10)}MB`)
-      .join(', ');
-    const self = getMemorySnapshot();
-    logger.info('[MEMORY] Combined container footprint', {
-      supervisorRssMb: superRssMb,
-      childrenRssMb: childRssTotalMb,
-      totalRssMb: Math.round((superRssMb + childRssTotalMb) * 10) / 10,
-      supervisorHeapMb: self.heapUsedMb,
-      perChild,
-    });
+    const totalMb = Math.round((superRssMb + childRssTotalMb) * 10) / 10;
+
+    const childParts = this.children
+      .filter((c) => c.getRssBytes() > 0)
+      .map((c) => `${c.status.name}=${Math.max(0, Math.round((c.getRssBytes() / 1024 / 1024) * 10) / 10)}MB`)
+      .join(' | ');
+
+    const parts = [`total=${totalMb}MB`, `supervisor=${superRssMb}MB`];
+    if (childParts) parts.push(childParts);
+
+    const usageRatio = totalMb / 512;
+    if (usageRatio >= 0.95) {
+      logger.error(`🚨 Memory critical | ${parts.join(' | ')} | cap=512MB`);
+    } else if (usageRatio >= 0.85) {
+      logger.warn(`⚠️ Memory high | ${parts.join(' | ')} | cap=512MB`);
+    } else {
+      logger.info(`🧠 Memory | ${parts.join(' | ')}`);
+    }
   }
 
-  /**
-   * Replies to an explicit status request from the gateway child (used on the
-   * gateway's first health check before any push/state-change has occurred).
-   */
   public handleGatewayRequest(childId: number, message: unknown): void {
     if (!message || typeof message !== 'object') return;
     const msg = message as { type?: string };
@@ -152,11 +140,6 @@ class Supervisor {
     }
   }
 
-  /**
-   * Sends the current aggregated health overview to the gateway child over IPC
-   * so its public /health/services endpoint can surface supervisor + per-service
-   * status without opening any additional ports.
-   */
   private pushStatusToGateway(): void {
     const gateway = this.children.find((c) => c.status.name === 'gateway');
     const child = gateway?.getChild();
@@ -164,31 +147,26 @@ class Supervisor {
     try {
       child.send({ type: 'SUPERVISOR_STATUS', payload: this.getHealthOverview() });
     } catch {
-      // IPC channel may not be open yet or is closing; the gateway falls back
-      // to live-upstream probing when no supervisor status has been received.
+      /* IPC channel may not be open yet */
     }
   }
 
   private validatePorts(services: ServiceSpec[], publicPortRaw: string | undefined): void {
     const publicPort = publicPortRaw ? Number(publicPortRaw) : undefined;
-    // Only non-gateway (loopback) ports participate in collision checks.
-    // The gateway's own port IS the public port — it can never collide with itself.
     const internalPorts = services
       .filter((s) => !s.isGateway)
       .flatMap((s) => (s.ports && s.ports.length > 0 ? s.ports : [s.port]));
     if (publicPort && Number.isFinite(publicPort)) {
       const conflict = internalPorts.find((p) => p === publicPort);
       if (conflict) {
-        logger.error(
-          `[STARTUP] Public port (${publicPort}) collides with an internal service port (${conflict}). Configure a different PORT or INTERNAL_PORT_* values and redeploy.`,
-        );
+        logger.error(`❌ Port conflict | public=${publicPort} collides with internal=${conflict}`);
         process.exit(1);
       }
     }
     const seen = new Set<number>();
     for (const p of internalPorts) {
       if (seen.has(p)) {
-        logger.error(`[STARTUP] Duplicate internal port ${p} assigned to multiple services. Configure INTERNAL_PORT_* values.`);
+        logger.error(`❌ Duplicate internal port ${p}`);
         process.exit(1);
       }
       seen.add(p);
@@ -197,14 +175,13 @@ class Supervisor {
 
   private installSignalHandlers(): void {
     const logSignal = (signal: string): void => {
-      logger.info(`[SUPERVISOR] ${signal} received — keeping all services running 24/7 (shutdown ignored)`);
+      logger.info(`📡 ${signal} received — keeping all services running 24/7`);
     };
 
     process.on('SIGTERM', () => logSignal('SIGTERM'));
     process.on('SIGINT', () => logSignal('SIGINT'));
   }
 
-  /** Aggregated health status for the gateway's /health/services endpoint. */
   public getHealthOverview(): {
     supervisor: { pid: number; uptimeSeconds: number; state: string };
     services: ServiceStatus[];
@@ -223,8 +200,6 @@ class Supervisor {
 const supervisor = new Supervisor();
 
 supervisor.start().catch((err: unknown) => {
-  logger.error('[STARTUP] Supervisor failed to start', {
-    error: err instanceof Error ? err.message : String(err),
-  });
+  logger.error(`❌ Supervisor failed to start | error=${err instanceof Error ? err.message : String(err)}`);
   process.exit(1);
 });

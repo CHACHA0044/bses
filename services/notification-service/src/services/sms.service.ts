@@ -1,13 +1,11 @@
 import { createLogger, NotificationStatus } from '@bses/shared';
 
-const logger = createLogger({ service: 'sms-service' });
+const logger = createLogger({ service: 'notification' });
 
 export class SmsService {
-  /**
-   * Simulates sending an SMS message during development/testing as required by the SRS.
-   */
   public async sendSms(recipient: string, message: string): Promise<NotificationStatus> {
-    logger.info(`[SMS SIMULATION] To: ${recipient} | Message: ${message}`);
+    const masked = recipient.length > 4 ? `${recipient.slice(0, 4)}****` : '****';
+    logger.debug(`SMS (simulated) | to=${masked} | chars=${message.length}`);
     return NotificationStatus.SIMULATED;
   }
 }

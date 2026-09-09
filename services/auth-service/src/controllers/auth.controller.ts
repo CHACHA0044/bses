@@ -11,7 +11,7 @@ import {
 } from '../validators/auth.validator';
 import { config } from '../config';
 
-const logger = createLogger({ service: 'auth-controller' });
+const logger = createLogger({ service: 'auth' });
 
 /**
  * Redact a user-supplied identifier so the audit log can still show that an
@@ -22,6 +22,11 @@ const redactIdentifier = (raw: unknown): string => {
   if (typeof raw !== 'string' || raw.length === 0) return '***';
   if (raw.length <= 2) return `${raw[0]}*`;
   return `${raw.substring(0, 2)}***`;
+};
+
+const fmtDuration = (startMs: number): string => {
+  const ms = Date.now() - startMs;
+  return ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms}ms`;
 };
 
 export class AuthController {
@@ -69,15 +74,13 @@ export class AuthController {
   }
 
   public register = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    const startedAt = Date.now();
     try {
-      // Log the attempt at the very top of the request handler — this fires
-      // even if validation/Database calls fail or hang, so the operator can
-      // see in Render that a registration request was received.
       const ipAddress = extractClientIp(req);
       const reqId = (req as { correlationId?: string }).correlationId || 'n/a';
       const username = redactIdentifier((req.body as { username?: string })?.username);
       const email = redactIdentifier((req.body as { email?: string })?.email);
-      logger.info(`[REGISTER_ATTEMPT] username=${username} email=${email} ip=${ipAddress} requestId=${reqId}`);
+      logger.info(`📝 Register attempt | user=${username} | email=${email}`);
 
       const validated = registerSchema.parse(req.body);
 
@@ -96,18 +99,22 @@ export class AuthController {
         { user: result.user, accessToken: result.tokens.accessToken },
         'Registration successful',
       );
+      logger.info(`✅ Registration success | role=${result.user.role} | ${fmtDuration(startedAt)}`);
     } catch (err) {
+      if (err instanceof Error) {
+        logger.warn(`❌ Register failed | reason=${err.message} | ${fmtDuration(startedAt)}`);
+      }
       next(err);
     }
   };
 
   public login = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    const startedAt = Date.now();
     try {
       const ipAddress = extractClientIp(req);
-      const reqId = (req as { correlationId?: string }).correlationId || 'n/a';
       const identifier = redactIdentifier((req.body as { identifier?: string })?.identifier);
       const rememberMe = (req.body as { rememberMe?: boolean })?.rememberMe === true;
-      logger.info(`[LOGIN_ATTEMPT] identifier=${identifier} rememberMe=${rememberMe} ip=${ipAddress} requestId=${reqId}`);
+      logger.info(`🔐 Login attempt | user=${identifier} | rememberMe=${rememberMe}`);
 
       const validated = loginSchema.parse(req.body);
 
@@ -124,7 +131,15 @@ export class AuthController {
         { user: result.user, accessToken: result.tokens.accessToken },
         'Login successful',
       );
+      logger.info(`✅ Login success | role=${result.user.role} | ${fmtDuration(startedAt)}`);
     } catch (err) {
+      if (err instanceof Error) {
+        const message = err.message.toLowerCase();
+        const reason = message.includes('locked')
+          ? 'account_locked'
+          : 'invalid_credentials';
+        logger.warn(`❌ Login failed | reason=${reason} | ${fmtDuration(startedAt)}`);
+      }
       next(err);
     }
   };

@@ -11,12 +11,13 @@ export interface ISmsProvider {
 }
 
 import { createLogger } from '@bses/shared';
-const logger = createLogger({ service: 'mock-sms-provider' });
+const logger = createLogger({ service: 'notification' });
 
 export class MockSmsProvider implements ISmsProvider {
   public async sendSms(recipient: string, message: string): Promise<SendSmsResult> {
     const messageId = `sms_sim_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-    logger.info(`[SMS DEV SIMULATOR] To: ${recipient} | MessageId: ${messageId} | Content: ${message}`);
+    const masked = recipient.length > 4 ? `${recipient.slice(0, 4)}****` : '****';
+    logger.info(`📧 SMS (simulated) | to=${masked} | id=${messageId} | chars=${message.length}`);
     return {
       status: NotificationStatus.SIMULATED,
       messageId,

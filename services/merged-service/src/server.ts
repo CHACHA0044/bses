@@ -54,6 +54,7 @@ const start = async (): Promise<void> => {
   setConsumerPrismaClient(sharedPrisma);
   setNotificationPrismaClient(sharedPrisma);
   setDocumentPrismaClient(sharedPrisma);
+  logger.info('🗄️ PostgreSQL connected (shared client)');
 
   // MongoDB GridFS for document storage (best-effort startup: a dev container
   // without MongoDB must still boot).
@@ -61,11 +62,11 @@ const start = async (): Promise<void> => {
     await connectMongoDB({
       uri: documentConfig.MONGODB_URI,
       bucketName: documentConfig.GRIDFS_BUCKET,
-    }).catch((err) => {
-      logger.warn(`MongoDB GridFS initial connection skipped in dev mode: ${err.message}`);
     });
+    logger.info(`🍃 MongoDB connected | GridFS=${documentConfig.GRIDFS_BUCKET}`);
   } catch (err: unknown) {
-    logger.warn('Merged service starting with uninitialized MongoDB GridFS connection.');
+    const msg = err instanceof Error ? err.message : String(err);
+    logger.warn(`⚠️ MongoDB connection deferred | reason=${msg}`);
   }
 
   const authApp: express.Application = createAuthApp();
@@ -74,14 +75,11 @@ const start = async (): Promise<void> => {
   const documentApp: express.Application = createDocumentApp();
 
   const servers: http.Server[] = [];
-  // IMPORTANT: never call `app.listen()` AND then `server.listen()` on the same
-  // server — that throws ERR_SERVER_ALREADY_LISTEN. Each app binds exactly once
-  // on its own loopback port inside `listen`.
   const listen = (app: express.Application, port: number, label: string): Promise<void> =>
     new Promise((resolve) => {
       const server = app.listen(port, '127.0.0.1', () => {
         servers.push(server);
-        logger.info(`${label} listening on 127.0.0.1:${port}`);
+        logger.info(`✅ ${label} listening on 127.0.0.1:${port}`);
         resolve();
       });
     });
@@ -93,38 +91,26 @@ const start = async (): Promise<void> => {
     listen(documentApp, documentPort, 'document'),
   ]);
 
-  logger.info('Merged service running', {
-    env: process.env['NODE_ENV'] ?? 'development',
-    ports: {
-      auth: authPort,
-      consumer: consumerPort,
-      notification: notificationPort,
-      document: documentPort,
-    },
-  });
+  logger.info('🧩 Internal services ready | auth=3010 consumer=3011 notification=3013 document=3012');
 
-  // Four Express apps in one process — a memory regression shows up here
-  // (before an OOM restart) thanks to a periodic RSS/heap sample.
   const memoryMonitor = startMemoryMonitor(logger, 'merged', 120_000);
 
-  // Recover any OCR rows left PENDING, or PROCESSING by a previous process
-  // (a crash/restart mid-job). Bounded sweep on the free tier.
   const recoveryTimer = setInterval(() => {
     ocrService.recoverInterruptedJobs().catch((err) => {
-      logger.error('OCR recovery sweep failed', { error: String(err) });
+      logger.error(`❌ OCR recovery sweep failed | error=${String(err)}`);
     });
   }, DOCUMENT_RECOVERY_INTERVAL_MS);
   setTimeout(() => {
     void ocrService
       .recoverInterruptedJobs()
       .then((recovered) => {
-        if (recovered > 0) logger.info(`OCR recovery re-queued ${recovered} interrupted document(s)`);
+        if (recovered > 0) logger.info(`🔄 OCR recovery re-queued ${recovered} interrupted document(s)`);
       })
-      .catch((err) => logger.error('OCR initial recovery failed', { error: String(err) }));
+      .catch((err) => logger.error(`❌ OCR initial recovery failed | error=${String(err)}`));
   }, 2000);
 
   const closeAll = async (): Promise<void> => {
-    logger.info('Merged service shutting down');
+    logger.info('🛑 Merged service shutting down');
     memoryMonitor.stop();
     clearInterval(recoveryTimer);
     const closes = servers.map(
@@ -145,6 +131,6 @@ const start = async (): Promise<void> => {
 };
 
 start().catch((err: unknown) => {
-  console.error('Fatal: Merged service failed to start', err);
+  logger.error(`❌ Merged service failed to start | error=${err instanceof Error ? err.message : String(err)}`);
   process.exit(1);
 });

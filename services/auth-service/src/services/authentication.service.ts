@@ -21,7 +21,17 @@ import { notificationClient } from './notification.client';
 import { getPrismaClient } from '../db/db.client';
 import { config } from '../config';
 
-const logger = createLogger({ service: 'auth-service-logic' });
+const logger = createLogger({ service: 'auth' });
+
+/** Masks an email for logging: us***@example.com */
+const redactEmail = (raw: string): string => {
+  const at = raw.indexOf('@');
+  if (at <= 0) return raw.length <= 2 ? `${raw[0]}*` : `${raw.substring(0, 2)}***`;
+  const local = raw.substring(0, at);
+  const domain = raw.substring(at + 1);
+  const maskedLocal = local.length <= 2 ? `${local[0]}*` : `${local.substring(0, 2)}***`;
+  return `${maskedLocal}@${domain}`;
+};
 
 export interface RegisterDTO {
   firstName: string;
@@ -432,7 +442,7 @@ export class AuthenticationService {
     const user = await userRepository.findByEmail(email);
     if (!user) {
       // Do not reveal email existence to prevent user enumeration
-      logger.info(`Forgot password requested for non-existent email: ${email}`);
+      logger.debug(`Password reset requested for unknown email | user=${redactEmail(email)}`);
       return;
     }
 
@@ -442,12 +452,12 @@ export class AuthenticationService {
     // Reset link generated from FRONTEND_URL (env-driven) so production
     // password-reset links point at the real frontend, not localhost.
     const resetUrl = `${config.FRONTEND_URL}/reset-password?token=${rawToken}`;
-    logger.info(`=======================================================`);
-    logger.info(`[DEV NOTIFICATION SIMULATOR] PASSWORD RESET LINK GENERATED:`);
-    logger.info(`Recipient: ${user.email} (${user.username})`);
-    logger.info(`Reset Link: ${resetUrl}`);
-    logger.info(`Expires At: ${expiresAt.toISOString()}`);
-    logger.info(`=======================================================`);
+    const isProduction = process.env['NODE_ENV'] === 'production';
+    logger.info(`🔑 Password reset link generated | recipient=${redactEmail(user.email)} | expires=${expiresAt.toISOString()}`);
+    if (!isProduction) {
+      // Dev convenience — the raw token must never appear in production logs.
+      logger.debug(`🔑 Reset link (dev only): ${resetUrl}`);
+    }
   }
 
   /**

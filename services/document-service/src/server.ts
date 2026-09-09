@@ -23,11 +23,11 @@ const createThrottledErrorLogger = (windowMs: number) => {
     const now = Date.now();
     const normalised = meta.error instanceof Error ? meta.error.message : String(meta.error);
     if (now - lastAt > windowMs || normalised !== lastMsg) {
-      logger.error(msg, meta);
+      logger.error(`❌ ${msg} | error=${normalised}`);
       lastMsg = normalised;
       lastAt = now;
     } else {
-      logger.debug(`${msg} (repeated, suppressed)`, meta);
+      logger.debug(`❌ ${msg} (repeated, suppressed)`);
     }
   };
 };
@@ -37,62 +37,53 @@ const start = async (): Promise<void> => {
     await connectMongoDB({
       uri: config.MONGODB_URI,
       bucketName: config.GRIDFS_BUCKET,
-    }).catch((err) => {
-      logger.warn(`MongoDB GridFS initial connection skipped in dev mode: ${err.message}`);
     });
+    logger.info(`🍃 MongoDB connected | GridFS=${config.GRIDFS_BUCKET}`);
   } catch (err: unknown) {
-    logger.warn('Document Service starting with uninitialized MongoDB GridFS connection.');
+    const msg = err instanceof Error ? err.message : String(err);
+    logger.warn(`⚠️ MongoDB connection deferred | reason=${msg}`);
   }
 
   try {
-    await connectDatabase().catch((err) => {
-      logger.warn(`PostgreSQL initial connection skipped in dev mode: ${err.message}`);
-    });
+    await connectDatabase();
+    logger.info('🗄️ PostgreSQL connected');
   } catch (err: unknown) {
-    logger.warn('Document Service starting with uninitialized database connection.');
+    const msg = err instanceof Error ? err.message : String(err);
+    logger.warn(`⚠️ PostgreSQL connection deferred | reason=${msg}`);
   }
 
   const app = createApp();
 
   const server = app.listen(config.PORT, '127.0.0.1', () => {
-    logger.info('Document service running', { port: config.PORT, env: config.NODE_ENV });
+    logger.info(`📄 Document service ready | port=${config.PORT} | env=${config.NODE_ENV}`);
   });
 
-  // The OCR + sharp + Tesseract memory profile is the largest in the system;
-  // sample it here so sustained growth is visible in Render logs before it
-  // reaches the container cap and triggers an OOM restart.
   const memoryMonitor = startMemoryMonitor(logger, 'document', 120_000);
 
-  // Recover any OCR rows left PENDING, or PROCESSING by a previous process
-  // (a crash/restart mid-job). Rows that already completed OCR pre-migration
-  // (ocr_confidence set, ocr_status default PENDING) are not re-processed.
   const logThrottledError = createThrottledErrorLogger(RECOVERY_INTERVAL_MS);
   const recoveryTimer = setInterval(() => {
     ocrService.recoverInterruptedJobs().catch((err) => {
       logThrottledError('OCR recovery sweep failed', { error: err });
     });
   }, RECOVERY_INTERVAL_MS);
-  // Initial recovery is deferred out of the critical startup path — the app is
-  // ready to serve uploads/downloads immediately; interrupted OCR jobs are
-  // re-queued asynchronously without blocking readiness.
   setTimeout(() => {
     void ocrService
       .recoverInterruptedJobs()
       .then((recovered) => {
-        if (recovered > 0) logger.info(`OCR recovery re-queued ${recovered} interrupted document(s)`);
+        if (recovered > 0) logger.info(`🔄 OCR recovery re-queued ${recovered} interrupted document(s)`);
       })
-      .catch((err) => logger.error('OCR initial recovery failed', { error: err }));
+      .catch((err) => logger.error(`❌ OCR initial recovery failed | error=${err instanceof Error ? err.message : String(err)}`));
   }, 2000);
 
   const shutdown = async (signal: string): Promise<void> => {
-    logger.info(`${signal} received — shutting down Document service gracefully`);
+    logger.info(`🛑 ${signal} received — shutting down Document service`);
     clearInterval(recoveryTimer);
     memoryMonitor.stop();
     server.close(async () => {
       await shutdownOcrEngine();
       await disconnectMongoDB();
       await disconnectDatabase();
-      logger.info('Document service server closed.');
+      logger.info('✅ Document service shut down');
       process.exit(0);
     });
   };
@@ -102,6 +93,6 @@ const start = async (): Promise<void> => {
 };
 
 start().catch((err: unknown) => {
-  console.error('Fatal: Document service failed to start', err);
+  logger.error(`❌ Document service failed to start | error=${err instanceof Error ? err.message : String(err)}`);
   process.exit(1);
 });

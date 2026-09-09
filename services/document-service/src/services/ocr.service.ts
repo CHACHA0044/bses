@@ -26,7 +26,10 @@ import { mergeQrAndOcr, MergedExtraction, TRACKED_FIELD_KEYS } from './ocr/qrMer
 import { notificationClient } from './notification.client';
 import { config } from '../config';
 
-const logger = createLogger({ service: 'ocr-service' });
+const logger = createLogger({ service: 'ocr' });
+
+/** Formats a duration in ms as human-friendly (e.g. 1.4s, 850ms). */
+const fmtMs = (ms: number): string => (ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${Math.round(ms)}ms`);
 
 // ── Tuning (bounded in-memory queue; DB is the durable job store) ──────────
 const MAX_PDF_PAGES = config.OCR_PDF_MAX_PAGES;
@@ -128,7 +131,7 @@ const ensureEngine = async (): Promise<void> => {
         workers.push(w);
       }
       engineReady = true;
-      logger.info(`OCR engine ready: ${WORKER_COUNT} workers, langs=${langs}`);
+      logger.info(`🧠 OCR engine ready | workers=${WORKER_COUNT} | langs=${langs}`);
     } finally {
       engineStarting = null;
     }
@@ -155,7 +158,7 @@ export const shutdownOcrEngine = async (): Promise<void> => {
   engineReady = false;
   if (pending.length) {
     await Promise.allSettled(pending.map((w) => w.terminate()));
-    logger.info(`OCR engine released (${pending.length} worker(s) terminated)`);
+    logger.info(`🛑 OCR engine released | workers=${pending.length}`);
   }
 };
 
@@ -377,9 +380,7 @@ export class OcrService {
         doc.userId,
       );
     } catch (err) {
-      logger.error(`Notification dispatch failed after OCR for ${documentId}`, {
-        error: err instanceof Error ? err.message : String(err),
-      });
+      logger.error(`❌ OCR notification dispatch failed | document=${documentId} | error=${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
@@ -484,11 +485,12 @@ export class OcrService {
       });
 
       const startedAt = Date.now();
+      logger.info(`🔍 OCR started | document=${documentId} | type=${doc.documentType}`);
       let meta: ExtractedDataWithMeta;
       try {
         meta = await this.runPipeline(documentId, doc.mimeType, doc.documentType, doc.gridfsFileId);
       } catch (err) {
-        logger.error(`OCR pipeline failed for ${documentId}`, { error: tryString(err) });
+        logger.error(`❌ OCR failed | document=${documentId} | reason=${tryString(err)}`);
         await this.fail(documentId, tryString(err));
         return;
       }
@@ -502,6 +504,7 @@ export class OcrService {
       for (const key of Object.keys(confidences)) {
         fieldDetails[key] = { confidence: confidences[key] ?? 0, source: sources[key] ?? 'unknown' };
       }
+      const extractedCount = Object.keys(confidences).length;
 
       try {
         const data: Prisma.DocumentUpdateInput = {
@@ -545,9 +548,10 @@ export class OcrService {
         await this.prisma.document.update({ where: { id: documentId }, data });
         await this.persistVerificationMeta(documentId, meta);
         await this.notifyIfNeeded(documentId, previousStatus, status);
-        logger.info(`OCR complete for ${documentId}: status=${status} conf=${meta.ocrConfidence} in ${elapsedMs}ms`);
+        const verdict = meta.decision && meta.decision.needsReview ? 'NEEDS_REVIEW' : meta.decision && meta.decision.unreadable ? 'UNREADABLE' : status;
+        logger.info(`✅ OCR complete | document=${documentId} | status=${verdict} | confidence=${meta.ocrConfidence}% | fields=${extractedCount} | ${fmtMs(elapsedMs)}`);
       } catch (err) {
-        logger.error(`Persist failed for ${documentId}`, { error: err });
+        logger.error(`❌ OCR persist failed | document=${documentId} | error=${tryString(err)}`);
         await this.fail(documentId, tryString(err));
       }
   }
@@ -572,7 +576,7 @@ export class OcrService {
       const conf = Math.max(30, Math.min(99, Math.round(avgConf * 100)));
       return buildCandidateResult(text, conf, docType);
     } catch (err) {
-      logger.warn('Secondary OCR failed', { error: tryString(err) });
+      logger.warn(`⚠️ Secondary OCR failed | error=${tryString(err)}`);
       return null;
     }
   }
@@ -617,10 +621,7 @@ export class OcrService {
         },
       });
     } catch (err) {
-      logger.warn(
-        'persistVerificationMeta failed for ' + documentId + ' (migration may not be applied yet)',
-        { error: tryString(err) },
-      );
+      logger.warn(`⚠️ Verification meta not persisted | document=${documentId} | error=${tryString(err)}`);
     }
   }
 
@@ -642,7 +643,7 @@ export class OcrService {
         },
       });
       await this.notifyIfNeeded(documentId, previousStatus, OcrJobStatus.FAILED);
-      logger.error(`Document ${documentId} FAILED after ${attempts} attempts`, { error });
+      logger.error(`❌ OCR failed | document=${documentId} | attempts=${attempts}/${MAX_ATTEMPTS} | reason=${error}`);
     } else {
       await this.prisma.document.update({
         where: { id: documentId },
@@ -652,6 +653,7 @@ export class OcrService {
           ocrLastError: error.slice(0, 1000),
         },
       });
+      logger.warn(`🔄 OCR retry | document=${documentId} | attempt=${attempts}/${MAX_ATTEMPTS} | reason=${error}`);
       setTimeout(() => void this.processNow(documentId), RETRY_BACKOFF_MS * 2 ** attempts);
     }
   }
@@ -714,8 +716,8 @@ export class OcrService {
       skewAngle: prep.skewAngle,
     });
     if (quality.overall < config.OCR_QUALITY_GATE) {
-      logger.info(
-        `Image quality ${quality.overall.toFixed(2)} below gate for ${documentId}: ${quality.issues.join(', ')}`,
+      logger.warn(
+        `⚠️ Image quality low | document=${documentId} | score=${quality.overall.toFixed(2)} | issues=${quality.issues.join(', ')}`,
       );
     }
 
@@ -726,9 +728,7 @@ export class OcrService {
       const decodeQr = await getDecodeQr();
       qrRaw = await decodeQr(qrCandidates);
     } catch (err) {
-      logger.warn(`QR decode failed for ${documentId}`, {
-        error: err instanceof Error ? err.message : String(err),
-      });
+      logger.debug(`QR decode failed | document=${documentId} | error=${err instanceof Error ? err.message : String(err)}`);
     }
     qrCandidates.length = 0;
     const qr = qrRaw ? parseQrPayload(qrRaw) : null;
@@ -745,11 +745,15 @@ export class OcrService {
     const verification = qr ? verifyQrSignature(qr.raw, qr.format) : null;
     const qrTrusted = verification?.status === 'SIGNED_VERIFIED';
 
+    if (verification && verification.status !== 'SIGNED_VERIFIED') {
+      logger.warn(`⚠️ QR unverified | document=${documentId} | status=${verification.status}`);
+    }
+
     if (qrComplete && qrTrusted) {
       text = qr?.raw ?? '';
       confidence = QR_CONFIDENCE;
       merged = mergeQrAndOcr({ qr: qrFields, ocr: null, docType });
-      logger.info(`QR authoritative (${qr?.format}) for ${documentId}; skipping OCR`);
+      logger.info(`🔎 QR verified | format=${qr?.format ?? 'unknown'} | document=${documentId} | OCR skipped`);
     } else {
       await ensureEngine();
       const candidates: Buffer[] = [prep.deskewedBuffer];
@@ -774,18 +778,18 @@ export class OcrService {
           const before = winner;
           winner = selectBestCandidate(results);
           logger.info(
-            `Secondary OCR used for ${documentId}: primary conf ${before.confidence} -> best ${winner.confidence}`,
+            `🧠 Secondary OCR used | document=${documentId} | primary=${before.confidence}% → best=${winner.confidence}%`,
           );
         }
       }
       if (prep.atBoundary) {
-        logger.info(`Deskew estimate at scan boundary; compared ${results.length} OCR variants for ${documentId}`);
+        logger.debug(`Deskew at scan boundary; compared ${results.length} OCR variants | document=${documentId}`);
       }
       text = winner.text;
       confidence = winner.confidence;
       merged = mergeQrAndOcr({ qr: qrFields, ocr: winner.extracted, docType, qrTrusted });
       if (qrFields) {
-        logger.info(`QR partial (${qr?.format}) for ${documentId}; OCR filled the gaps`);
+        logger.info(`🔎 QR partial | format=${qr?.format ?? 'unknown'} | document=${documentId} | OCR filled gaps`);
       }
     }
 
@@ -853,7 +857,7 @@ export class OcrService {
     fileBuffer: Buffer,
     docType: DocumentType,
   ): Promise<ExtractedDataWithMeta> {
-    logger.info(`Extracting text from PDF for document ${documentId}`);
+    logger.info(`📄 PDF text extraction | document=${documentId} | maxPages=${MAX_PDF_PAGES}`);
 
     // Secure, XML-hygienic PDF parsing. We deliberately disable anything that
     // could execute or interpret embedded content:
@@ -971,7 +975,7 @@ export class OcrService {
 }
 
 const lgWarn = (msg: string, err: unknown) => {
-  logger.warn(msg, { error: err instanceof Error ? err.message : String(err) });
+  logger.warn(`⚠️ ${msg} | error=${err instanceof Error ? err.message : String(err)}`);
 };
 
 const tryString = (err: unknown): string => (err instanceof Error ? err.message : String(err));
